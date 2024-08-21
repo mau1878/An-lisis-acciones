@@ -11,116 +11,136 @@ import re
 
 st.title("Análisis de Precios de Acciones")
 
-# User inputs for stock and ratio
-ticker = st.text_input("Ingrese el ticker de la acción:", "AAPL").upper()
+# User inputs
+input_ratio = st.text_input("Ingrese el ticker o la razón de las acciones:", "YPFD.BA/YPF")
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
-ratio_input = st.text_input("Ingrese la razón de acciones (por ejemplo: 'YPFD.BA/YPF', 'GGAL.BA*10/GGAL', 'METR.BA/(GGAL.BA*10/GGAL)')", "")
+end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
 
-# Function to fetch data and compute the ratio
-def fetch_and_compute_ratio(ratio_expr, start_date):
-    tickers = set(re.findall(r'[A-Z]+\.[A-Z]+', ratio_expr))  # Extract tickers from the ratio expression
+# Function to fetch and compute data for ratios
+def fetch_data(tickers, start_date, end_date):
     data = {}
-    
     for ticker in tickers:
-        df = yf.download(ticker, start=start_date)
-        if not df.empty:
-            df['Month'] = df.index.to_period('M')
-            df = df.resample('M').ffill()
-            df[ticker] = df['Adj Close']
-            data[ticker] = df
-        else:
-            st.warning(f"No hay datos disponibles para el ticker {ticker}.")
+        data[ticker] = yf.download(ticker, start=start_date, end=end_date)
+        if data[ticker].empty:
+            st.error(f"No hay datos disponibles para el ticker {ticker} en el rango de fechas seleccionado.")
             return None
+    return data
 
-    # Combine all dataframes
-    combined_df = pd.concat(data.values(), axis=1)
-    combined_df.columns = data.keys()
-
+# Function to evaluate the ratio expression
+def evaluate_ratio(ratio_str, data):
+    # Extract tickers and operators
+    tokens = re.split(r'([/*])', ratio_str.replace(' ', ''))
+    tickers = [token for token in tokens if token and token not in '/*']
+    operators = [token for token in tokens if token in '/*']
+    
+    # Fetch data for all tickers
+    if not all(ticker in data for ticker in tickers):
+        st.error("Faltan datos para algunos tickers en la razón.")
+        return None
+    
     # Compute the ratio
-    ratio = combined_df.eval(ratio_expr)
-    ratio.name = 'Ratio'
+    result = None
+    for i, ticker in enumerate(tickers):
+        if result is None:
+            result = data[ticker]['Adj Close']
+        else:
+            if operators[i-1] == '*':
+                result *= data[ticker]['Adj Close']
+            elif operators[i-1] == '/':
+                result /= data[ticker]['Adj Close']
     
-    return combined_df, ratio
+    return result
 
-# Fetch stock data and compute ratio
-st.write(f"Obteniendo datos para la razón '{ratio_input}' desde {start_date} en adelante...")
-combined_data, ratio = fetch_and_compute_ratio(ratio_input, start_date)
+# Process the ratio input
+st.write(f"Obteniendo datos para la razón {input_ratio} desde {start_date} hasta {end_date}...")
+data = fetch_data(re.findall(r'\b\w+\.\w+', input_ratio), start_date, end_date)
 
-if combined_data is not None and ratio is not None:
-    # Plot ratio
-    st.write("### Variación del Ratio")
-    fig = px.line(ratio, x=ratio.index, y='Ratio',
-                  title=f"Variación del Ratio: {ratio_input}",
-                  labels={'Ratio': 'Ratio'})
-    fig.update_traces(mode='lines+markers')
-    st.plotly_chart(fig)
-
-    # Histogram with Gaussian and percentiles
-    st.write("### Histograma de Variaciones del Ratio con Ajuste de Gauss")
-    ratio_changes = ratio.pct_change().dropna() * 100
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.histplot(ratio_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
+if data:
+    # Evaluate ratio
+    ratio_data = evaluate_ratio(input_ratio, data)
     
-    # Fit Gaussian distribution
-    mu, std = norm.fit(ratio_changes)
-    xmin, xmax = ax.get_xlim()
-    x = np.linspace(xmin, xmax, 100)
-    p = norm.pdf(x, mu, std)
-    ax.plot(x, p, 'k', linewidth=2)
-    
-    # Percentiles with different colors and vertical labels
-    percentiles = [5, 25, 50, 75, 95]
-    colors = ['red', 'orange', 'green', 'blue', 'purple']
-    for i, percentile in enumerate(percentiles):
-        perc_value = np.percentile(ratio_changes, percentile)
-        ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
-        ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
-                rotation=90, verticalalignment='center', horizontalalignment='right')
+    if ratio_data is not None:
+        # Calculate monthly price variations
+        ratio_data = ratio_data.to_frame(name='Adjusted Close')
+        ratio_data.index = pd.to_datetime(ratio_data.index)
+        ratio_data['Month'] = ratio_data.index.to_period('M')
+        monthly_data = ratio_data.resample('M').ffill()
+        monthly_data['Cambio Mensual (%)'] = monthly_data['Adjusted Close'].pct_change() * 100
 
-    ax.set_title(f"Histograma de Cambios del Ratio con Ajuste de Gauss")
-    ax.set_xlabel("Cambio (%)")
-    ax.set_ylabel("Densidad")
-    ax.legend()
-    st.pyplot(fig)
+        # Plot monthly price variations
+        st.write("### Variaciones Mensuales de Precios")
+        fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
+                      title=f"Variaciones Mensuales de {input_ratio}",
+                      labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
+        fig.update_traces(mode='lines+markers')
+        st.plotly_chart(fig)
 
-    # Heatmap of monthly variations
-    st.write("### Mapa de Calor de Variaciones Mensuales del Ratio")
-    monthly_pivot = ratio.to_frame().pivot_table(values='Ratio', index=ratio.index.year, columns=ratio.index.month, aggfunc='mean')
-    
-    # Define a custom colormap with greens for positive values and reds for negative values
-    colors = ['red', 'white', 'green']
-    cmap = LinearSegmentedColormap.from_list('custom_diverging', colors)
-    
-    fig, ax = plt.subplots(figsize=(12, 8))
-    sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-    plt.title(f"Mapa de Calor de Variaciones Mensuales del Ratio")
-    plt.xlabel("Mes")
-    plt.ylabel("Año")
-    st.pyplot(fig)
+        # Histogram with Gaussian and percentiles
+        st.write("### Histograma de Variaciones Mensuales con Ajuste de Gauss")
+        monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
 
-    # Monthly and yearly average changes
-    st.write("### Cambios Promedio Mensuales del Ratio")
-    avg_monthly_changes = ratio.groupby(ratio.index.month).mean()
-    avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-    ax.set_title("Cambios Promedio Mensuales del Ratio")
-    ax.set_xlabel("Mes")
-    ax.set_ylabel("Cambio Promedio Mensual (%)")
-    st.pyplot(fig)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.histplot(monthly_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
+        
+        # Fit Gaussian distribution
+        mu, std = norm.fit(monthly_changes)
+        xmin, xmax = ax.get_xlim()
+        x = np.linspace(xmin, xmax, 100)
+        p = norm.pdf(x, mu, std)
+        ax.plot(x, p, 'k', linewidth=2)
+        
+        # Percentiles with different colors and vertical labels
+        percentiles = [5, 25, 50, 75, 95]
+        colors = ['red', 'orange', 'green', 'blue', 'purple']
+        for i, percentile in enumerate(percentiles):
+            perc_value = np.percentile(monthly_changes, percentile)
+            ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
+            ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
+                    rotation=90, verticalalignment='center', horizontalalignment='right')
 
-    st.write("### Cambios Promedio Anuales del Ratio")
-    avg_yearly_changes = ratio.groupby(ratio.index.year).mean()
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-    ax.set_title("Cambios Promedio Anuales del Ratio")
-    ax.set_xlabel("Año")
-    ax.set_ylabel("Cambio Promedio Anual (%)")
-    st.pyplot(fig)
+        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
+        ax.set_xlabel("Cambio Mensual (%)")
+        ax.set_ylabel("Densidad")
+        ax.legend()
+        st.pyplot(fig)
 
-    # Display statistical summary
-    st.write("### Resumen Estadístico")
-    st.write(ratio.describe())
+        # Heatmap of monthly variations
+        st.write("### Mapa de Calor de Variaciones Mensuales")
+        monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
+        
+        # Define a custom colormap with greens for positive values and reds for negative values
+        colors = ['red', 'white', 'green']
+        cmap = LinearSegmentedColormap.from_list('custom_diverging', colors)
+        
+        fig, ax = plt.subplots(figsize=(12, 8))
+        sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
+        plt.title(f"Mapa de Calor de Variaciones Mensuales para {input_ratio}")
+        plt.xlabel("Mes")
+        plt.ylabel("Año")
+        st.pyplot(fig)
+
+        # Monthly and yearly average changes
+        st.write("### Cambios Promedio Mensuales")
+        avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
+        avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
+        ax.set_title("Cambios Promedio Mensuales")
+        ax.set_xlabel("Mes")
+        ax.set_ylabel("Cambio Promedio Mensual (%)")
+        st.pyplot(fig)
+
+        st.write("### Cambios Promedio Anuales")
+        avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
+        ax.set_title("Cambios Promedio Anuales")
+        ax.set_xlabel("Año")
+        ax.set_ylabel("Cambio Promedio Anual (%)")
+        st.pyplot(fig)
+
+        # Display statistical summary
+        st.write("### Resumen Estadístico")
+        st.write(monthly_changes.describe())
