@@ -7,7 +7,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
-import re
 
 # Define custom colormap
 def get_custom_cmap():
@@ -44,32 +43,51 @@ def align_dates(data):
     return data
 
 # Function to evaluate the ratio
-def evaluate_ratio(main_ticker, ratio_divisor, data):
+def evaluate_ratio(main_ticker, second_ticker, third_ticker, data):
     if not main_ticker:
         st.error("El ticker principal no puede estar vacío.")
         return None
 
-    # Process the ratio with the optional divisor
-    if ratio_divisor:
+    # Process the ratio with optional divisors
+    if second_ticker and third_ticker:
         main_ticker = main_ticker.upper()
-        ratio_divisor = ratio_divisor.upper()
+        second_ticker = second_ticker.upper()
+        third_ticker = third_ticker.upper()
 
         if main_ticker in data:
             result = data[main_ticker]['Adj Close']
-            if ratio_divisor in data:
-                result /= data[ratio_divisor]['Adj Close']
+            if second_ticker in data:
+                if third_ticker in data:
+                    result /= (data[second_ticker]['Adj Close'] / data[third_ticker]['Adj Close'])
+                else:
+                    st.error(f"El tercer divisor no está disponible en los datos: {third_ticker}")
+                    return None
             else:
-                st.error(f"Divisor no disponible en los datos: {ratio_divisor}")
+                st.error(f"El segundo divisor no está disponible en los datos: {second_ticker}")
                 return None
         else:
-            st.error(f"Ticker principal no disponible en los datos: {main_ticker}")
+            st.error(f"El ticker principal no está disponible en los datos: {main_ticker}")
+            return None
+    elif second_ticker:
+        main_ticker = main_ticker.upper()
+        second_ticker = second_ticker.upper()
+
+        if main_ticker in data:
+            result = data[main_ticker]['Adj Close']
+            if second_ticker in data:
+                result /= data[second_ticker]['Adj Close']
+            else:
+                st.error(f"El segundo divisor no está disponible en los datos: {second_ticker}")
+                return None
+        else:
+            st.error(f"El ticker principal no está disponible en los datos: {main_ticker}")
             return None
     else:
         main_ticker = main_ticker.upper()
         if main_ticker in data:
             result = data[main_ticker]['Adj Close']
         else:
-            st.error(f"Ticker principal no disponible en los datos: {main_ticker}")
+            st.error(f"El ticker principal no está disponible en los datos: {main_ticker}")
             return None
 
     return result
@@ -79,7 +97,8 @@ st.title("Análisis de Precios de Acciones")
 
 # User inputs
 main_ticker = st.text_input("Ingrese el ticker principal:")
-ratio_divisor = st.text_input("Ingrese el ticker o ratio divisor (opcional):")
+second_ticker = st.text_input("Ingrese el segundo ticker o ratio divisor (opcional):")
+third_ticker = st.text_input("Ingrese el tercer ticker o ratio divisor (opcional):")
 
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
@@ -88,7 +107,7 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
 # Extract tickers from the inputs
-tickers = {main_ticker, ratio_divisor}
+tickers = {main_ticker, second_ticker, third_ticker}
 tickers = {ticker.upper() for ticker in tickers if ticker}
 
 data = fetch_data(tickers, start_date, end_date)
@@ -97,7 +116,7 @@ if data:
     data = align_dates(data)
     
     # Evaluate ratio
-    ratio_data = evaluate_ratio(main_ticker, ratio_divisor, data)
+    ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data)
     
     if ratio_data is not None:
         # Calculate monthly price variations
@@ -110,7 +129,7 @@ if data:
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
         fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
-                      title=f"Variaciones Mensuales de {main_ticker}" + (f" / {ratio_divisor}" if ratio_divisor else ""),
+                      title=f"Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
                       labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
         fig.update_traces(mode='lines+markers')
         st.plotly_chart(fig)
@@ -153,7 +172,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {ratio_divisor}" if ratio_divisor else ""))
+        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         plt.xlabel("Mes")
         plt.ylabel("Año")
         st.pyplot(fig)
@@ -174,14 +193,17 @@ if data:
         st.pyplot(fig)
 
         st.write(f"### Cambios Promedio {metric_option} Anuales")
+        yearly_data = ratio_data.resample('Y').ffill()
         if metric_option == "Promedio":
-            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().mean() * 100
         else:
-            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
-        
+            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().median() * 100
+        avg_yearly_changes.index = pd.to_datetime(avg_yearly_changes.index, format='%Y').strftime('%Y')
+
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
         ax.set_title(f"Cambios Promedio {metric_option} Anuales")
         ax.set_xlabel("Año")
         ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
         st.pyplot(fig)
+
