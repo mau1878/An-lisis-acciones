@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
 import re
+import ast
 
 # Define custom colormap
 def get_custom_cmap():
@@ -45,57 +46,46 @@ def align_dates(data):
 
 # Function to evaluate the ratio expression
 def evaluate_ratio(ratio_str, data):
-    # Extract tickers, numbers, and operators from ratio string
-    tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/]|\d+(\.\d+)?', ratio_str.replace(' ', ''))
+    # Replace ticker symbols with their data
+    def eval_expr(expr):
+        # Safe eval function for simple mathematical expressions
+        return eval(expr, {"__builtins__": None}, data)
     
-    # Initialize lists
-    tickers = []
-    operators = []
-    numbers = []
-    
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if token in '+-*/':
-            operators.append(token)
-        elif re.match(r'\d+(\.\d+)?', token):  # If token is a number
-            numbers.append(float(token))
-        else:  # Token is a ticker
-            tickers.append(token.upper())
+    # Tokenize the ratio string and parse
+    def parse_ratio(ratio_str):
+        # Replace common tickers with their data
+        tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/\(\)]|\d+(\.\d+)?', ratio_str.replace(' ', ''))
+        expr = ""
+        for token in tokens:
+            if token in '+-*/()':
+                expr += token
+            elif re.match(r'\d+(\.\d+)?', token):  # If token is a number
+                expr += token
+            else:  # Token is a ticker
+                ticker = token.upper()
+                if ticker in data:
+                    expr += f"data['{ticker}']['Adj Close']"
+                else:
+                    st.error(f"Ticker no disponible en los datos: {ticker}")
+                    return None
         
-        i += 1
+        return expr
     
-    # Check for missing tickers
-    missing_tickers = [ticker for ticker in tickers if ticker not in data]
-    if missing_tickers:
-        st.error(f"Tickers no disponibles en los datos: {', '.join(missing_tickers)}")
-        return None
-    
-    # Evaluate the ratio
-    result = None
-    for i, ticker in enumerate(tickers):
-        if result is None:
-            result = data[ticker]['Adj Close']
-        else:
-            if operators[i-1] == '*':
-                result *= data[ticker]['Adj Close']
-            elif operators[i-1] == '/':
-                result /= data[ticker]['Adj Close']
-    
-    # Apply numbers as multipliers or divisors
-    for i, num in enumerate(numbers):
-        if i % 2 == 0:  # Even indices in numbers list are multipliers
-            result *= num
-        else:  # Odd indices in numbers list are divisors
-            result /= num
-    
-    return result
+    expr = parse_ratio(ratio_str)
+    if expr:
+        try:
+            result = eval_expr(expr)
+            return result
+        except Exception as e:
+            st.error(f"Error al evaluar la expresión {expr}: {e}")
+            return None
+    return None
 
 # Streamlit app
 st.title("Análisis de Precios de Acciones")
 
 # User inputs
-input_ratio = st.text_input("Ingrese el ticker o el ratio de las acciones:", "YPFD.BA/YPF")
+input_ratio = st.text_input("Ingrese el ticker o el ratio de las acciones (puede usar paréntesis):", "YPFD.BA/YPF")
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
 
@@ -103,28 +93,9 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
 # Extract tickers and numbers from the input ratio
-def extract_tickers_and_numbers(ratio_str):
-    tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/]|\d+(\.\d+)?', ratio_str.replace(' ', ''))
-    
-    tickers = []
-    operators = []
-    numbers = []
-    
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if token in '+-*/':
-            operators.append(token)
-        elif re.match(r'\d+(\.\d+)?', token):  # If token is a number
-            numbers.append(float(token))
-        else:  # Token is a ticker
-            tickers.append(token.upper())
-        
-        i += 1
-    
-    return tickers, operators, numbers
+tickers = re.findall(r'[A-Z0-9\.]+', input_ratio)
+tickers = list(set(tickers))  # Remove duplicates
 
-tickers, operators, numbers = extract_tickers_and_numbers(input_ratio)
 data = fetch_data(tickers, start_date, end_date)
 
 if data:
