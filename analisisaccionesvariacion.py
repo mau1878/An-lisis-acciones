@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
 import re
-import ast
+from sympy import symbols, sympify, lambdify
 
 # Define custom colormap
 def get_custom_cmap():
@@ -44,32 +44,36 @@ def align_dates(data):
     
     return data
 
-# Function to parse and evaluate the ratio
-def evaluate_ratio(ratio_expression, data):
-    # Replace tickers with their 'Adj Close' values
-    ticker_replacement = {}
-    for ticker in data:
-        ticker_replacement[ticker] = f"data['{ticker}']['Adj Close']"
-    
-    # Handle numbers and mathematical operations in the ratio
-    parsed_expression = ratio_expression
-    for ticker in ticker_replacement:
-        parsed_expression = parsed_expression.replace(ticker, ticker_replacement[ticker])
-    
-    # Evaluate the ratio expression
+# Function to evaluate the ratio
+def evaluate_ratio(expression, data):
     try:
-        result = eval(parsed_expression)
+        # Create symbols for tickers
+        tickers = list(data.keys())
+        ticker_symbols = {ticker: symbols(ticker) for ticker in tickers}
+        
+        # Parse and evaluate the expression
+        expr = sympify(expression)
+        expr_func = lambdify(list(ticker_symbols.values()), expr, modules=['numpy'])
+        
+        # Create a DataFrame to store results
+        results = pd.DataFrame(index=data[tickers[0]].index)
+        for ticker in tickers:
+            results[ticker] = data[ticker]['Adj Close']
+        
+        # Evaluate the expression for each date
+        results['Result'] = results.apply(lambda row: expr_func(*row), axis=1)
+        
+        return results['Result']
     except Exception as e:
-        st.error(f"Error al evaluar la razón: {e}")
+        st.error(f"Error al evaluar la expresión '{expression}': {e}")
         return None
-
-    return result
 
 # Streamlit app
 st.title("Análisis de Precios de Acciones")
 
-# User input
-ratio_expression = st.text_input("Ingrese el ticker principal y el divisor (opcional, en formato de razón):", value="YPFD.BA/YPF")
+# User inputs
+main_ticker = st.text_input("Ingrese el ticker principal:")
+optional_expression = st.text_input("Ingrese el ratio o expresión opcional (opcional):")
 
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
@@ -77,8 +81,9 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 # Option to choose between average and median for monthly and yearly graphs
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
-# Extract tickers from the input
-tickers = set(re.findall(r'[A-Z\.]+', ratio_expression))
+# Extract tickers from the inputs
+tickers = {main_ticker, optional_expression}
+tickers = {ticker.upper() for ticker in tickers if ticker}
 
 data = fetch_data(tickers, start_date, end_date)
 
@@ -86,7 +91,7 @@ if data:
     data = align_dates(data)
     
     # Evaluate ratio
-    ratio_data = evaluate_ratio(ratio_expression, data)
+    ratio_data = evaluate_ratio(optional_expression, data)
     
     if ratio_data is not None:
         # Calculate monthly price variations
@@ -99,7 +104,7 @@ if data:
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
         fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
-                      title=f"Variaciones Mensuales de {ratio_expression}",
+                      title=f"Variaciones Mensuales de {main_ticker}" + (f" / {optional_expression}" if optional_expression else ""),
                       labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
         fig.update_traces(mode='lines+markers')
         st.plotly_chart(fig)
@@ -142,7 +147,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-        plt.title(f"Mapa de Calor de Variaciones Mensuales para {ratio_expression}")
+        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {optional_expression}" if optional_expression else ""))
         plt.xlabel("Mes")
         plt.ylabel("Año")
         st.pyplot(fig)
