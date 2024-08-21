@@ -93,7 +93,7 @@ st.title("Análisis de Precios de Acciones - MTaurus - X: https://x.com/MTaurus_
 apply_ypfd_ratio = st.checkbox("Dividir el ticker principal por dólar CCL de YPF", value=False)
 
 # User inputs
-main_ticker = st.text_input("Ingrese el ticker principal:")
+main_ticker = st.text_input("Ingrese el ticker principal (por ejemplo GGAL.BA o METR.BA o AAPL o BMA:")
 second_ticker = st.text_input("Ingrese el segundo ticker o ratio divisor (opcional):")
 third_ticker = st.text_input("Ingrese el tercer ticker o ratio divisor (opcional):")
 
