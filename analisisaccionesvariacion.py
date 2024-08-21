@@ -22,16 +22,21 @@ def fetch_data(tickers, start_date, end_date):
     for ticker in tickers:
         ticker = ticker.upper()  # Ensure ticker is uppercase
         st.write(f"Descargando datos para el ticker {ticker}...")
-        df = yf.download(ticker, start=start_date, end=end_date)
-        
-        if df.empty:
-            st.error(f"No hay datos disponibles para el ticker {ticker} en el rango de fechas seleccionado.")
-            return None
-        data[ticker] = df
+        try:
+            df = yf.download(ticker, start=start_date, end=end_date)
+            if df.empty:
+                st.warning(f"No hay datos disponibles para el ticker {ticker} en el rango de fechas seleccionado.")
+            else:
+                data[ticker] = df
+        except Exception as e:
+            st.error(f"Error al descargar datos para el ticker {ticker}: {e}")
     return data
 
 # Function to align dates and fill missing values
 def align_dates(data):
+    if not data:
+        return {}
+    
     # Determine the date range based on the first ticker
     first_ticker_dates = data[list(data.keys())[0]].index
     
