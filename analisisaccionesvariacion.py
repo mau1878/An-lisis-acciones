@@ -45,7 +45,7 @@ def align_dates(data):
 
 # Function to evaluate the ratio expression
 def evaluate_ratio(ratio_str, data):
-    # Tokenize input ratio string while distinguishing between tickers and numbers
+    # Extract numbers and tickers from ratio string
     tokens = re.findall(r'[A-Z0-9\.]+|[/*]', ratio_str.replace(' ', ''))
     
     tickers = []
@@ -63,9 +63,6 @@ def evaluate_ratio(ratio_str, data):
             tickers.append(token.upper())
         
         i += 1
-    
-    # Extract tickers from the numbers list
-    tickers = [token for token in tickers if not re.match(r'\d+', token)]
     
     # Check missing tickers
     missing_tickers = [ticker for ticker in tickers if ticker not in data]
@@ -105,7 +102,6 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
 # Extract tickers and numbers from the input ratio
-# This step assumes that numbers directly following tickers should be treated as part of the ticker
 ratios_and_tickers = re.findall(r'[A-Z0-9\.]+|[/*]', input_ratio.replace(' ', ''))
 tickers = [token.upper() for token in ratios_and_tickers if re.match(r'[A-Z0-9\.]+', token) and not re.match(r'\d+', token)]
 data = fetch_data(tickers, start_date, end_date)
