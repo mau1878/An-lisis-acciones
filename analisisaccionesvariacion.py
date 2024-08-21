@@ -6,6 +6,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
 
 st.title("Stock Price Analysis")
 
@@ -68,7 +69,8 @@ else:
     monthly_pivot = monthly_data.pivot_table(values='Monthly Change (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
     
     # Define a custom colormap with greens for positive values and reds for negative values
-    cmap = sns.diverging_palette(250, 10, as_cmap=True, s=100, l=50)
+    colors = ['red', 'white', 'green']
+    cmap = LinearSegmentedColormap.from_list('custom_diverging', colors)
     
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
