@@ -92,43 +92,36 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data):
 
     return result
 
-# Calculate streaks and dispersion
-def calculate_streaks(data):
-    positive_streaks = []
-    negative_streaks = []
-    
-    # Calculate monthly changes
-    monthly_changes = data['Cambio Mensual (%)'].dropna()
-    streak_length = 0
-    last_sign = np.sign(monthly_changes.iloc[0])
+# Function to calculate streaks and variations
+def calculate_streaks_and_variations(data):
+    daily_changes = data.pct_change() * 100
+    daily_changes = daily_changes.dropna()
 
-    for change in monthly_changes:
-        current_sign = np.sign(change)
-        if current_sign == last_sign:
-            streak_length += 1
-        else:
-            if last_sign > 0:
-                positive_streaks.append(streak_length)
-            elif last_sign < 0:
-                negative_streaks.append(streak_length)
-            streak_length = 1
-            last_sign = current_sign
+    # Longest positive and negative streaks
+    daily_changes['Streak'] = (daily_changes > 0).astype(int).groupby((daily_changes > 0).astype(int).cumsum()).cumsum()
+    daily_changes['Negative_Streak'] = (daily_changes < 0).astype(int).groupby((daily_changes < 0).astype(int).cumsum()).cumsum()
+
+    longest_positive_streak = daily_changes['Streak'].max()
+    longest_negative_streak = daily_changes['Negative_Streak'].max()
     
-    # Append the last streak
-    if streak_length > 0:
-        if last_sign > 0:
-            positive_streaks.append(streak_length)
-        elif last_sign < 0:
-            negative_streaks.append(streak_length)
+    avg_positive_streak = daily_changes[daily_changes > 0]['Streak'].mean()
+    avg_negative_streak = daily_changes[daily_changes < 0]['Negative_Streak'].mean()
+
+    # Maximum and minimum variations
+    max_variation = daily_changes.max()
+    min_variation = daily_changes.min()
+
+    # Dispersion
+    dispersion = daily_changes.std()
 
     return {
-        'longest_positive_streak': max(positive_streaks, default=0),
-        'longest_negative_streak': max(negative_streaks, default=0),
-        'average_positive_streak': np.mean(positive_streaks) if positive_streaks else 0,
-        'average_negative_streak': np.mean(negative_streaks) if negative_streaks else 0,
-        'max_variation': monthly_changes.max() if not monthly_changes.empty else 0,
-        'min_variation': monthly_changes.min() if not monthly_changes.empty else 0,
-        'dispersion': np.std(monthly_changes) if not monthly_changes.empty else 0
+        'longest_positive_streak': longest_positive_streak,
+        'longest_negative_streak': longest_negative_streak,
+        'avg_positive_streak': avg_positive_streak,
+        'avg_negative_streak': avg_negative_streak,
+        'max_variation': max_variation,
+        'min_variation': min_variation,
+        'dispersion': dispersion
     }
 
 # Streamlit app
@@ -158,95 +151,86 @@ if data:
     ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data)
     
     if ratio_data is not None:
-        # Convert ratio data to DataFrame
+        # Calculate monthly price variations
         ratio_data = ratio_data.to_frame(name='Adjusted Close')
         ratio_data.index = pd.to_datetime(ratio_data.index)
-        
-        # Calculate monthly price variations
         ratio_data['Month'] = ratio_data.index.to_period('M')
-        monthly_data = ratio_data.resample('ME').ffill()
+        monthly_data = ratio_data.resample('M').ffill()
         monthly_data['Cambio Mensual (%)'] = monthly_data['Adjusted Close'].pct_change() * 100
-        
-        # Calculate yearly price variations
-        ratio_data['Year'] = ratio_data.index.to_period('Y')
-        yearly_data = ratio_data.resample('YE').ffill()
-        yearly_data['Cambio Anual (%)'] = yearly_data['Adjusted Close'].pct_change() * 100
 
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
-        if not monthly_data['Cambio Mensual (%)'].dropna().empty:
-            fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
-                          title=f"Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
-                          labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
-            fig.update_traces(mode='lines+markers')
-            st.plotly_chart(fig)
-        else:
-            st.warning("No hay datos disponibles para mostrar las variaciones mensuales.")
+        fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
+                      title=f"Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
+                      labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
+        fig.update_traces(mode='lines+markers')
+        st.plotly_chart(fig)
 
-        # Plot yearly price variations
-        st.write("### Variaciones Anuales de Precios")
-        if not yearly_data['Cambio Anual (%)'].dropna().empty:
-            fig = px.line(yearly_data, x=yearly_data.index, y='Cambio Anual (%)',
-                          title=f"Variaciones Anuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
-                          labels={'Cambio Anual (%)': 'Cambio Anual (%)'})
-            fig.update_traces(mode='lines+markers')
-            st.plotly_chart(fig)
-        else:
-            st.warning("No hay datos disponibles para mostrar las variaciones anuales.")
-        
         # Histogram with Gaussian and percentiles
         st.write("### Histograma de Variaciones Mensuales con Ajuste de Gauss")
         monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
 
-        if not monthly_changes.empty:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            sns.histplot(monthly_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
-            
-            # Fit Gaussian
-            mu, std = norm.fit(monthly_changes)
-            xmin, xmax = ax.get_xlim()
-            x = np.linspace(xmin, xmax, 100)
-            p = norm.pdf(x, mu, std)
-            ax.plot(x, p, 'k', linewidth=2)
-            ax.set_title('Histograma de Variaciones Mensuales con Ajuste de Gauss')
-            ax.set_xlabel('Variación Mensual (%)')
-            ax.set_ylabel('Densidad')
-            
-            # Percentiles
-            p5 = np.percentile(monthly_changes, 5)
-            p95 = np.percentile(monthly_changes, 95)
-            ax.axvline(p5, color='r', linestyle='--', label='5º Percentil')
-            ax.axvline(p95, color='g', linestyle='--', label='95º Percentil')
-            ax.legend()
-
-            st.pyplot(fig)
-        else:
-            st.warning("No hay datos suficientes para mostrar el histograma.")
-
-        # Heatmap of monthly changes
-        st.write("### Mapa de Calor de Variaciones Mensuales")
-        monthly_pivot = monthly_data.pivot_table(index=monthly_data.index.year, columns=monthly_data.index.month, values='Cambio Mensual (%)', aggfunc='mean' if metric_option == "Promedio" else 'median')
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.histplot(monthly_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
         
-        if not monthly_pivot.empty:
-            fig, ax = plt.subplots(figsize=(10, 8))
-            sns.heatmap(monthly_pivot, cmap=get_custom_cmap(), annot=True, fmt=".1f", ax=ax, center=0)
-            ax.set_title(f"Mapa de Calor de Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-            ax.set_xlabel('Mes')
-            ax.set_ylabel('Año')
-            st.pyplot(fig)
+        # Fit Gaussian distribution
+        mu, std = norm.fit(monthly_changes)
+        xmin, xmax = ax.get_xlim()
+        x = np.linspace(xmin, xmax, 100)
+        p = norm.pdf(x, mu, std)
+        ax.plot(x, p, 'k', linewidth=2)
+        
+        # Percentiles with different colors and vertical labels
+        percentiles = [5, 25, 50, 75, 95]
+        colors = ['red', 'orange', 'green', 'blue', 'purple']
+        for i, percentile in enumerate(percentiles):
+            perc_value = np.percentile(monthly_changes, percentile)
+            ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
+            ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
+                    rotation=90, verticalalignment='center', horizontalalignment='right')
+
+        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
+        ax.set_xlabel("Cambio Mensual (%)")
+        ax.set_ylabel("Densidad")
+        ax.legend()
+        st.pyplot(fig)
+
+        # Heatmap of monthly variations
+        st.write("### Mapa de Calor de Variaciones Mensuales")
+        monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
+        
+        # Define a custom colormap with greens for positive values and reds for negative values
+        cmap = get_custom_cmap()
+        
+        fig, ax = plt.subplots(figsize=(12, 8))
+        sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", ax=ax, center=0)
+        ax.set_title(f"Mapa de Calor de Cambios Mensuales de {main_ticker}")
+        ax.set_xlabel("Mes")
+        ax.set_ylabel("Año")
+        st.pyplot(fig)
+
+        # Calculate and display additional statistics
+        stats = calculate_streaks_and_variations(monthly_data['Cambio Mensual (%)'])
+        st.write("### Estadísticas Adicionales")
+        st.write(f"Racha Positiva Más Larga: {stats['longest_positive_streak']} días")
+        st.write(f"Racha Negativa Más Larga: {stats['longest_negative_streak']} días")
+        st.write(f"Promedio de Rachas Positivas: {stats['avg_positive_streak']:.2f} días")
+        st.write(f"Promedio de Rachas Negativas: {stats['avg_negative_streak']:.2f} días")
+        st.write(f"Variación Máxima: {stats['max_variation']:.2f}%")
+        st.write(f"Variación Mínima: {stats['min_variation']:.2f}%")
+        st.write(f"Dispersión: {stats['dispersion']:.2f}")
+
+        # Plot yearly data
+        st.write("### Cambios Anuales de Precios")
+        yearly_data = ratio_data.resample('Y').ffill()
+        if metric_option == "Promedio":
+            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().mean() * 100
         else:
-            st.warning("No hay datos suficientes para mostrar el mapa de calor.")
+            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().median() * 100
 
-        # Calculate and display statistics
-        st.write("### Estadísticas de Variaciones Mensuales")
-        stats = calculate_streaks(monthly_data)
-        st.write(f"**Mayor racha positiva:** {stats['longest_positive_streak']} meses")
-        st.write(f"**Mayor racha negativa:** {stats['longest_negative_streak']} meses")
-        st.write(f"**Promedio de rachas positivas:** {stats['average_positive_streak']:.2f} meses")
-        st.write(f"**Promedio de rachas negativas:** {stats['average_negative_streak']:.2f} meses")
-        st.write(f"**Variación máxima:** {stats['max_variation']:.2f}%")
-        st.write(f"**Variación mínima:** {stats['min_variation']:.2f}%")
-        st.write(f"**Dispersion:** {stats['dispersion']:.2f}")
-
-    else:
-        st.warning("No se pudo calcular el ratio o no hay datos suficientes.")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
+        ax.set_title(f"Cambios Promedio {metric_option} Anuales")
+        ax.set_xlabel("Año")
+        ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
+        st.pyplot(fig)
