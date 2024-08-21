@@ -92,6 +92,62 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data):
 
     return result
 
+# Calculate streaks and variations
+def calculate_streaks_and_variations(data):
+    daily_changes = data['Adjusted Close'].pct_change() * 100
+    positive_streaks = []
+    negative_streaks = []
+    current_streak = 0
+    current_streak_type = None
+    
+    for change in daily_changes:
+        if change > 0:
+            if current_streak_type == 'positive':
+                current_streak += 1
+            else:
+                if current_streak_type == 'negative':
+                    negative_streaks.append(current_streak)
+                current_streak = 1
+                current_streak_type = 'positive'
+        elif change < 0:
+            if current_streak_type == 'negative':
+                current_streak += 1
+            else:
+                if current_streak_type == 'positive':
+                    positive_streaks.append(current_streak)
+                current_streak = 1
+                current_streak_type = 'negative'
+        else:
+            if current_streak_type == 'positive':
+                positive_streaks.append(current_streak)
+            elif current_streak_type == 'negative':
+                negative_streaks.append(current_streak)
+            current_streak = 0
+            current_streak_type = None
+    
+    if current_streak_type == 'positive':
+        positive_streaks.append(current_streak)
+    elif current_streak_type == 'negative':
+        negative_streaks.append(current_streak)
+    
+    max_positive_streak = max(positive_streaks) if positive_streaks else 0
+    max_negative_streak = max(negative_streaks) if negative_streaks else 0
+    avg_positive_streak = np.mean(positive_streaks) if positive_streaks else 0
+    avg_negative_streak = np.mean(negative_streaks) if negative_streaks else 0
+    max_variation = daily_changes.max()
+    min_variation = daily_changes.min()
+    dispersion = daily_changes.std()
+
+    return {
+        'Max Positive Streak': max_positive_streak,
+        'Max Negative Streak': max_negative_streak,
+        'Avg Positive Streak': avg_positive_streak,
+        'Avg Negative Streak': avg_negative_streak,
+        'Max Variation': max_variation,
+        'Min Variation': min_variation,
+        'Dispersion': dispersion
+    }
+
 # Streamlit app
 st.title("Análisis de Precios de Acciones")
 
@@ -157,42 +213,30 @@ if data:
             ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
                     rotation=90, verticalalignment='center', horizontalalignment='right')
 
-        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
+        ax.set_title(f"Histograma de Variaciones Mensuales con Ajuste de Gauss")
         ax.set_xlabel("Cambio Mensual (%)")
         ax.set_ylabel("Densidad")
         ax.legend()
         st.pyplot(fig)
 
-        # Heatmap of monthly variations
+        # Heatmap for monthly changes
         st.write("### Mapa de Calor de Variaciones Mensuales")
-        monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
-        
-        # Define a custom colormap with greens for positive values and reds for negative values
-        cmap = get_custom_cmap()
-        
-        fig, ax = plt.subplots(figsize=(12, 8))
-        sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        heatmap_data = monthly_data.pivot_table(index=monthly_data.index.to_period('M').strftime('%Y-%m'), columns='Month', values='Cambio Mensual (%)')
+        fig = plt.figure(figsize=(12, 8))
+        sns.heatmap(heatmap_data, cmap=get_custom_cmap(), annot=False, fmt=".1f", linewidths=0.5)
+        plt.title(f"Mapa de Calor de Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         plt.xlabel("Mes")
-        plt.ylabel("Año")
+        plt.ylabel("Año-Mes")
         st.pyplot(fig)
+
+        # Calculate and display additional metrics
+        st.write("### Métricas Adicionales")
+        metrics = calculate_streaks_and_variations(ratio_data)
+        for metric, value in metrics.items():
+            st.write(f"{metric}: {value:.2f}")
 
         # Monthly and yearly average/median changes
-        st.write(f"### Cambios Promedio {metric_option} Mensuales")
-        if metric_option == "Promedio":
-            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
-        else:
-            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].median()
-        avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Mensuales")
-        ax.set_xlabel("Mes")
-        ax.set_ylabel(f"Cambio {metric_option} Mensual (%)")
-        st.pyplot(fig)
-
-        st.write(f"### Cambios Promedio {metric_option} Anuales")
+        st.write("### Cambios Promedio y Mediana Anuales")
         yearly_data = ratio_data.resample('Y').ffill()
         if metric_option == "Promedio":
             avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().mean() * 100
