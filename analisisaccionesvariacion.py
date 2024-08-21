@@ -90,7 +90,7 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ypfd_ra
 st.title("Análisis de Precios de Acciones")
 
 # User option to apply the YPFD.BA/YPF ratio
-apply_ypfd_ratio = st.checkbox("Aplicar la razón YPFD.BA/YPF al ticker principal", value=False)
+apply_ypfd_ratio = st.checkbox("Dividir el ticker principal por dólar CCL de YPF", value=False)
 
 # User inputs
 main_ticker = st.text_input("Ingrese el ticker principal:")
