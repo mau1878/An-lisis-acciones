@@ -45,10 +45,7 @@ def align_dates(data):
     return data
 
 # Function to evaluate the ratio expression
-def evaluate_ratio(ratio_str, data):
-    # Remove spaces
-    ratio_str = ratio_str.replace(' ', '')
-    
+def evaluate_ratio(main_ticker, ratio_str, data):
     # Define function to handle mathematical expressions
     def eval_expr(expr):
         # Evaluate expression safely using pandas
@@ -60,10 +57,10 @@ def evaluate_ratio(ratio_str, data):
             return None
     
     # Tokenize the ratio string and parse
-    def parse_ratio(ratio_str):
+    def parse_ratio(main_ticker, ratio_str):
         # Replace common tickers with their data
         tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/\(\)]|\d+(\.\d+)?', ratio_str)
-        expr = ""
+        expr = f"data['{main_ticker.upper()}']['Adj Close']"
         for token in tokens:
             if token in '+-*/()':
                 expr += token
@@ -72,14 +69,14 @@ def evaluate_ratio(ratio_str, data):
             else:  # Token is a ticker
                 ticker = token.upper()
                 if ticker in data:
-                    expr += f"data['{ticker}']['Adj Close']"
+                    expr += f" / data['{ticker}']['Adj Close']"
                 else:
                     st.error(f"Ticker no disponible en los datos: {ticker}")
                     return None
         
         return expr
     
-    expr = parse_ratio(ratio_str)
+    expr = parse_ratio(main_ticker, ratio_str)
     if expr:
         return eval_expr(expr)
     return None
@@ -88,7 +85,8 @@ def evaluate_ratio(ratio_str, data):
 st.title("Análisis de Precios de Acciones")
 
 # User inputs
-input_ratio = st.text_input("Ingrese el ticker o el ratio de las acciones (puede usar paréntesis):", "YPFD.BA/YPF")
+main_ticker = st.text_input("Ingrese el ticker principal (por ejemplo, GGAL):", "YPFD.BA")
+ratio_input = st.text_input("Ingrese el divisor o ratio (puede usar paréntesis y números):", "YPF")
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
 
@@ -96,7 +94,7 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
 # Extract tickers and numbers from the input ratio
-tickers = re.findall(r'[A-Z0-9\.]+', input_ratio)
+tickers = [main_ticker] + re.findall(r'[A-Z0-9\.]+', ratio_input)
 tickers = list(set(tickers))  # Remove duplicates
 
 data = fetch_data(tickers, start_date, end_date)
@@ -105,7 +103,7 @@ if data:
     data = align_dates(data)
     
     # Evaluate ratio
-    ratio_data = evaluate_ratio(input_ratio, data)
+    ratio_data = evaluate_ratio(main_ticker, ratio_input, data)
     
     if ratio_data is not None:
         # Calculate monthly price variations
@@ -118,7 +116,7 @@ if data:
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
         fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
-                      title=f"Variaciones Mensuales de {input_ratio}",
+                      title=f"Variaciones Mensuales de {main_ticker} / {ratio_input}",
                       labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
         fig.update_traces(mode='lines+markers')
         st.plotly_chart(fig)
@@ -161,7 +159,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-        plt.title(f"Mapa de Calor de Variaciones Mensuales para {input_ratio}")
+        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker} / {ratio_input}")
         plt.xlabel("Mes")
         plt.ylabel("Año")
         st.pyplot(fig)
