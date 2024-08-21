@@ -72,9 +72,12 @@ def evaluate_ratio(ratio_str, data):
 st.title("Análisis de Precios de Acciones")
 
 # User inputs
-input_ratio = st.text_input("Ingrese el ticker o la razón de las acciones:", "YPFD.BA/YPF")
+input_ratio = st.text_input("Ingrese el ticker o el ratio de las acciones:", "YPFD.BA/YPF")
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
+
+# Option to choose between average and median for monthly and yearly graphs
+metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
 # Extract tickers from the input ratio
 tickers = re.findall(r'\b\w+\.\w+|\b\w+', input_ratio)
@@ -145,26 +148,32 @@ if data:
         plt.ylabel("Año")
         st.pyplot(fig)
 
-        # Monthly and yearly average changes
-        st.write("### Cambios Promedio Mensuales")
-        avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
+        # Monthly and yearly average/median changes
+        st.write(f"### Cambios Promedio {metric_option} Mensuales")
+        if metric_option == "Promedio":
+            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
+        else:
+            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].median()
         avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title("Cambios Promedio Mensuales")
+        ax.set_title(f"Cambios Promedio {metric_option} Mensuales")
         ax.set_xlabel("Mes")
-        ax.set_ylabel("Cambio Promedio Mensual (%)")
+        ax.set_ylabel(f"Cambio {metric_option} Mensual (%)")
         st.pyplot(fig)
 
-        st.write("### Cambios Promedio Anuales")
-        avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+        st.write(f"### Cambios Promedio {metric_option} Anuales")
+        if metric_option == "Promedio":
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+        else:
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title("Cambios Promedio Anuales")
+        ax.set_title(f"Cambios Promedio {metric_option} Anuales")
         ax.set_xlabel("Año")
-        ax.set_ylabel("Cambio Promedio Anual (%)")
+        ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
         st.pyplot(fig)
 
         # Display statistical summary
