@@ -119,60 +119,87 @@ if data:
     ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data)
     
     if ratio_data is not None:
-        # Calculate monthly price variations
+        # Convert ratio data to DataFrame
         ratio_data = ratio_data.to_frame(name='Adjusted Close')
         ratio_data.index = pd.to_datetime(ratio_data.index)
+        
+        # Calculate monthly price variations
         ratio_data['Month'] = ratio_data.index.to_period('M')
         monthly_data = ratio_data.resample('ME').ffill()
         monthly_data['Cambio Mensual (%)'] = monthly_data['Adjusted Close'].pct_change() * 100
+        
+        # Calculate yearly price variations
+        ratio_data['Year'] = ratio_data.index.to_period('Y')
+        yearly_data = ratio_data.resample('YE').ffill()
+        yearly_data['Cambio Anual (%)'] = yearly_data['Adjusted Close'].pct_change() * 100
 
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
-        fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
-                      title=f"Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
-                      labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
-        fig.update_traces(mode='lines+markers')
-        st.plotly_chart(fig)
+        if not monthly_data['Cambio Mensual (%)'].dropna().empty:
+            fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
+                          title=f"Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
+                          labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
+            fig.update_traces(mode='lines+markers')
+            st.plotly_chart(fig)
+        else:
+            st.warning("No hay datos disponibles para mostrar las variaciones mensuales.")
 
+        # Plot yearly price variations
+        st.write("### Variaciones Anuales de Precios")
+        if not yearly_data['Cambio Anual (%)'].dropna().empty:
+            fig = px.line(yearly_data, x=yearly_data.index, y='Cambio Anual (%)',
+                          title=f"Variaciones Anuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
+                          labels={'Cambio Anual (%)': 'Cambio Anual (%)'})
+            fig.update_traces(mode='lines+markers')
+            st.plotly_chart(fig)
+        else:
+            st.warning("No hay datos disponibles para mostrar las variaciones anuales.")
+        
         # Histogram with Gaussian and percentiles
         st.write("### Histograma de Variaciones Mensuales con Ajuste de Gauss")
         monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.histplot(monthly_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
-        
-        # Fit Gaussian distribution
-        mu, std = norm.fit(monthly_changes)
-        xmin, xmax = ax.get_xlim()
-        x = np.linspace(xmin, xmax, 100)
-        p = norm.pdf(x, mu, std)
-        ax.plot(x, p, 'k', linewidth=2)
-        
-        # Percentiles with different colors and vertical labels
-        percentiles = [5, 25, 50, 75, 95]
-        colors = ['red', 'orange', 'green', 'blue', 'purple']
-        for i, percentile in enumerate(percentiles):
-            perc_value = np.percentile(monthly_changes, percentile)
-            ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
-            ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
-                    rotation=90, verticalalignment='center', horizontalalignment='right')
+        if not monthly_changes.empty:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sns.histplot(monthly_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
+            
+            # Fit Gaussian distribution
+            mu, std = norm.fit(monthly_changes)
+            xmin, xmax = ax.get_xlim()
+            x = np.linspace(xmin, xmax, 100)
+            p = norm.pdf(x, mu, std)
+            ax.plot(x, p, 'k', linewidth=2)
+            
+            # Percentiles with different colors and vertical labels
+            percentiles = [5, 25, 50, 75, 95]
+            colors = ['red', 'orange', 'green', 'blue', 'purple']
+            for i, percentile in enumerate(percentiles):
+                perc_value = np.percentile(monthly_changes, percentile)
+                ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
+                ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
+                        rotation=90, verticalalignment='center', horizontalalignment='right')
 
-        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
-        ax.set_xlabel("Cambio Mensual (%)")
-        ax.set_ylabel("Densidad")
-        ax.legend()
-        st.pyplot(fig)
+            ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
+            ax.set_xlabel("Cambio Mensual (%)")
+            ax.set_ylabel("Densidad")
+            ax.legend()
+            st.pyplot(fig)
+        else:
+            st.warning("No hay datos suficientes para mostrar el histograma.")
 
         # Heatmap of monthly variations
         st.write("### Mapa de Calor de Variaciones Mensuales")
         monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
-        
-        # Define a custom colormap with greens for positive values and reds for negative values
-        cmap = get_custom_cmap()
-        
-        fig, ax = plt.subplots(figsize=(12, 8))
-        sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-        plt.xlabel('Mes')
-        plt.ylabel('Año')
-        st.pyplot(fig)
+
+        if not monthly_pivot.empty:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            sns.heatmap(monthly_pivot, cmap=get_custom_cmap(), annot=True, fmt=".1f", ax=ax, center=0)
+            ax.set_title(f"Mapa de Calor de Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+            ax.set_xlabel('Mes')
+            ax.set_ylabel('Año')
+            st.pyplot(fig)
+        else:
+            st.warning("No hay datos suficientes para mostrar el mapa de calor.")
+
+    else:
+        st.warning("No se pudo calcular el ratio o no hay datos suficientes.")
