@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
 import re
+import ast
 
 # Define custom colormap
 def get_custom_cmap():
@@ -43,43 +44,32 @@ def align_dates(data):
     
     return data
 
-# Function to evaluate the ratio
-def evaluate_ratio(main_ticker, ratio_divisor, data):
-    if not main_ticker:
-        st.error("El ticker principal no puede estar vacío.")
+# Function to parse and evaluate the ratio
+def evaluate_ratio(ratio_expression, data):
+    # Replace tickers with their 'Adj Close' values
+    ticker_replacement = {}
+    for ticker in data:
+        ticker_replacement[ticker] = f"data['{ticker}']['Adj Close']"
+    
+    # Handle numbers and mathematical operations in the ratio
+    parsed_expression = ratio_expression
+    for ticker in ticker_replacement:
+        parsed_expression = parsed_expression.replace(ticker, ticker_replacement[ticker])
+    
+    # Evaluate the ratio expression
+    try:
+        result = eval(parsed_expression)
+    except Exception as e:
+        st.error(f"Error al evaluar la razón: {e}")
         return None
-
-    # Process the ratio with the optional divisor
-    if ratio_divisor:
-        main_ticker = main_ticker.upper()
-        ratio_divisor = ratio_divisor.upper()
-
-        if main_ticker in data:
-            result = data[main_ticker]['Adj Close']
-            if ratio_divisor in data:
-                result /= data[ratio_divisor]['Adj Close']
-            else:
-                st.error(f"Divisor no disponible en los datos: {ratio_divisor}")
-                return None
-        else:
-            st.error(f"Ticker principal no disponible en los datos: {main_ticker}")
-            return None
-    else:
-        main_ticker = main_ticker.upper()
-        if main_ticker in data:
-            result = data[main_ticker]['Adj Close']
-        else:
-            st.error(f"Ticker principal no disponible en los datos: {main_ticker}")
-            return None
 
     return result
 
 # Streamlit app
 st.title("Análisis de Precios de Acciones")
 
-# User inputs
-main_ticker = st.text_input("Ingrese el ticker principal:")
-ratio_divisor = st.text_input("Ingrese el ticker o ratio divisor (opcional):")
+# User input
+ratio_expression = st.text_input("Ingrese el ticker principal y el divisor (opcional, en formato de razón):", value="YPFD.BA/YPF")
 
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
@@ -87,9 +77,8 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 # Option to choose between average and median for monthly and yearly graphs
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
-# Extract tickers from the inputs
-tickers = {main_ticker, ratio_divisor}
-tickers = {ticker.upper() for ticker in tickers if ticker}
+# Extract tickers from the input
+tickers = set(re.findall(r'[A-Z\.]+', ratio_expression))
 
 data = fetch_data(tickers, start_date, end_date)
 
@@ -97,7 +86,7 @@ if data:
     data = align_dates(data)
     
     # Evaluate ratio
-    ratio_data = evaluate_ratio(main_ticker, ratio_divisor, data)
+    ratio_data = evaluate_ratio(ratio_expression, data)
     
     if ratio_data is not None:
         # Calculate monthly price variations
@@ -110,7 +99,7 @@ if data:
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
         fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
-                      title=f"Variaciones Mensuales de {main_ticker}" + (f" / {ratio_divisor}" if ratio_divisor else ""),
+                      title=f"Variaciones Mensuales de {ratio_expression}",
                       labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
         fig.update_traces(mode='lines+markers')
         st.plotly_chart(fig)
@@ -153,7 +142,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {ratio_divisor}" if ratio_divisor else ""))
+        plt.title(f"Mapa de Calor de Variaciones Mensuales para {ratio_expression}")
         plt.xlabel("Mes")
         plt.ylabel("Año")
         st.pyplot(fig)
