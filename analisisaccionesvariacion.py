@@ -158,7 +158,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Mensuales")
+        ax.set_title(f"Cambios {metric_option} Mensuales")
         ax.set_xlabel("Mes")
         ax.set_ylabel(f"Cambio {metric_option} Mensual (%)")
         st.pyplot(fig)
@@ -171,7 +171,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Anuales")
+        ax.set_title(f"Cambios {metric_option} Anuales")
         ax.set_xlabel("Año")
         ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
         st.pyplot(fig)
