@@ -79,6 +79,28 @@ else:
     plt.ylabel("Year")
     st.pyplot(fig)
 
+    # Monthly and yearly average changes
+    st.write("### Average Monthly Changes")
+    avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Monthly Change (%)'].mean()
+    avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
+    ax.set_title("Average Monthly Changes")
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Average Monthly Change (%)")
+    st.pyplot(fig)
+
+    st.write("### Average Yearly Changes")
+    avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Monthly Change (%)'].mean()
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
+    ax.set_title("Average Yearly Changes")
+    ax.set_xlabel("Year")
+    ax.set_ylabel("Average Yearly Change (%)")
+    st.pyplot(fig)
+
     # Display statistical summary
     st.write("### Statistical Summary")
     st.write(monthly_changes.describe())
