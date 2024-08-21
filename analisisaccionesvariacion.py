@@ -177,7 +177,7 @@ if data:
         st.pyplot(fig)
 
         # Monthly and yearly average/median changes
-        st.write(f"### Cambios Promedio {metric_option} Mensuales")
+        st.write(f"### Cambios {metric_option} Mensuales")
         if metric_option == "Promedio":
             avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
         else:
@@ -186,7 +186,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         ax.set_ylabel(f"Cambio {metric_option} (%)")
         st.pyplot(fig)
         
