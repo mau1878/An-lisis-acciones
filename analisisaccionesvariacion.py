@@ -92,6 +92,49 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data):
 
     return result
 
+# Function to calculate streaks
+def calculate_streaks(data):
+    positive_streaks = []
+    negative_streaks = []
+    
+    current_streak = 0
+    streak_type = None
+    
+    for change in data:
+        if change > 0:
+            if streak_type == 'negative':
+                negative_streaks.append(current_streak)
+                current_streak = 0
+            current_streak += 1
+            streak_type = 'positive'
+        elif change < 0:
+            if streak_type == 'positive':
+                positive_streaks.append(current_streak)
+                current_streak = 0
+            current_streak += 1
+            streak_type = 'negative'
+        else:
+            if streak_type:
+                if streak_type == 'positive':
+                    positive_streaks.append(current_streak)
+                elif streak_type == 'negative':
+                    negative_streaks.append(current_streak)
+                current_streak = 0
+                streak_type = None
+    
+    # Append the last streak
+    if streak_type == 'positive':
+        positive_streaks.append(current_streak)
+    elif streak_type == 'negative':
+        negative_streaks.append(current_streak)
+    
+    return {
+        'longest_positive_streak': max(positive_streaks, default=0),
+        'longest_negative_streak': max(negative_streaks, default=0),
+        'avg_positive_streak': np.mean(positive_streaks) if positive_streaks else 0,
+        'avg_negative_streak': np.mean(negative_streaks) if negative_streaks else 0
+    }
+
 # Streamlit app
 st.title("Análisis de Precios de Acciones")
 
@@ -123,16 +166,15 @@ if data:
         ratio_data = ratio_data.to_frame(name='Adjusted Close')
         ratio_data.index = pd.to_datetime(ratio_data.index)
         
-        # Calculate monthly price variations
+        # Calculate monthly and yearly price variations
         ratio_data['Month'] = ratio_data.index.to_period('M')
-        monthly_data = ratio_data.resample('ME').ffill()
+        monthly_data = ratio_data.resample('M').ffill()
         monthly_data['Cambio Mensual (%)'] = monthly_data['Adjusted Close'].pct_change() * 100
         
-        # Calculate yearly price variations
         ratio_data['Year'] = ratio_data.index.to_period('Y')
-        yearly_data = ratio_data.resample('YE').ffill()
+        yearly_data = ratio_data.resample('Y').ffill()
         yearly_data['Cambio Anual (%)'] = yearly_data['Adjusted Close'].pct_change() * 100
-
+        
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
         if not monthly_data['Cambio Mensual (%)'].dropna().empty:
@@ -171,28 +213,25 @@ if data:
             ax.plot(x, p, 'k', linewidth=2)
             
             # Percentiles with different colors and vertical labels
-            percentiles = [5, 25, 50, 75, 95]
-            colors = ['red', 'orange', 'green', 'blue', 'purple']
-            for i, percentile in enumerate(percentiles):
-                perc_value = np.percentile(monthly_changes, percentile)
-                ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
-                ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
-                        rotation=90, verticalalignment='center', horizontalalignment='right')
-
-            ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
-            ax.set_xlabel("Cambio Mensual (%)")
-            ax.set_ylabel("Densidad")
+            percentiles = [5, 95]
+            for perc in percentiles:
+                perc_value = np.percentile(monthly_changes, perc)
+                ax.axvline(perc_value, color='red' if perc == 5 else 'green', linestyle='--', label=f'{perc}° Percentil')
+                ax.text(perc_value, ax.get_ylim()[1] * 0.8, f'{perc}° Percentil', color='red' if perc == 5 else 'green', ha='center')
+            
+            ax.set_title(f'Histograma de Variaciones Mensuales y Ajuste de Gauss de {main_ticker}' + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+            ax.set_xlabel('Cambio Mensual (%)')
+            ax.set_ylabel('Densidad')
             ax.legend()
             st.pyplot(fig)
         else:
-            st.warning("No hay datos suficientes para mostrar el histograma.")
+            st.warning("No hay datos disponibles para mostrar el histograma.")
 
-        # Heatmap of monthly variations
+        # Heatmap of monthly changes
         st.write("### Mapa de Calor de Variaciones Mensuales")
-        monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
-
+        monthly_pivot = monthly_data.pivot_table(index=monthly_data.index.to_period('Y').astype(str), columns=monthly_data.index.to_period('M').astype(str), values='Cambio Mensual (%)')
         if not monthly_pivot.empty:
-            fig, ax = plt.subplots(figsize=(10, 8))
+            fig, ax = plt.subplots(figsize=(12, 8))
             sns.heatmap(monthly_pivot, cmap=get_custom_cmap(), annot=True, fmt=".1f", ax=ax, center=0)
             ax.set_title(f"Mapa de Calor de Variaciones Mensuales de {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
             ax.set_xlabel('Mes')
@@ -200,6 +239,56 @@ if data:
             st.pyplot(fig)
         else:
             st.warning("No hay datos suficientes para mostrar el mapa de calor.")
+        
+        # Monthly and Yearly median/average bar plots
+        st.write("### Gráficos de Mediana y Promedio Mensuales y Anuales")
+        
+        if metric_option == "Promedio":
+            monthly_median = monthly_data['Cambio Mensual (%)'].resample('M').mean()
+            yearly_median = yearly_data['Cambio Anual (%)'].resample('Y').mean()
+            monthly_avg = monthly_data['Cambio Mensual (%)'].resample('M').mean()
+            yearly_avg = yearly_data['Cambio Anual (%)'].resample('Y').mean()
+        else:
+            monthly_median = monthly_data['Cambio Mensual (%)'].resample('M').median()
+            yearly_median = yearly_data['Cambio Anual (%)'].resample('Y').median()
+            monthly_avg = monthly_data['Cambio Mensual (%)'].resample('M').median()
+            yearly_avg = yearly_data['Cambio Anual (%)'].resample('Y').median()
+
+        # Monthly median and average bar plots
+        if not monthly_median.empty:
+            fig, ax = plt.subplots(figsize=(12, 6))
+            monthly_median.plot(kind='bar', color='orange', ax=ax, label='Mediana Mensual')
+            monthly_avg.plot(kind='bar', color='blue', ax=ax, alpha=0.5, label='Promedio Mensual')
+            ax.set_title(f'Mediana y Promedio Mensuales de {main_ticker}' + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+            ax.set_xlabel('Mes')
+            ax.set_ylabel('Cambio Mensual (%)')
+            ax.legend()
+            st.pyplot(fig)
+        else:
+            st.warning("No hay datos suficientes para mostrar el gráfico de mediana mensual.")
+        
+        # Yearly median and average bar plots
+        if not yearly_median.empty:
+            fig, ax = plt.subplots(figsize=(12, 6))
+            yearly_median.plot(kind='bar', color='orange', ax=ax, label='Mediana Anual')
+            yearly_avg.plot(kind='bar', color='blue', ax=ax, alpha=0.5, label='Promedio Anual')
+            ax.set_title(f'Mediana y Promedio Anuales de {main_ticker}' + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+            ax.set_xlabel('Año')
+            ax.set_ylabel('Cambio Anual (%)')
+            ax.legend()
+            st.pyplot(fig)
+        else:
+            st.warning("No hay datos suficientes para mostrar el gráfico de mediana anual.")
+
+        # Calculate streaks
+        st.write("### Estadísticas de Rachas")
+        changes = monthly_data['Cambio Mensual (%)'].dropna().values
+        streak_stats = calculate_streaks(changes)
+        
+        st.write(f"Racha positiva más larga: {streak_stats['longest_positive_streak']} meses")
+        st.write(f"Racha negativa más larga: {streak_stats['longest_negative_streak']} meses")
+        st.write(f"Racha positiva promedio: {streak_stats['avg_positive_streak']:.2f} meses")
+        st.write(f"Racha negativa promedio: {streak_stats['avg_negative_streak']:.2f} meses")
 
     else:
         st.warning("No se pudo calcular el ratio o no hay datos suficientes.")
