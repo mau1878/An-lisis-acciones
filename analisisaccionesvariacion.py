@@ -198,7 +198,6 @@ if data:
             avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().mean() * 100
         else:
             avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().median() * 100
-        avg_yearly_changes.index = pd.to_datetime(avg_yearly_changes.index, format='%Y').strftime('%Y')
 
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
@@ -206,4 +205,3 @@ if data:
         ax.set_xlabel("Año")
         ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
         st.pyplot(fig)
-
