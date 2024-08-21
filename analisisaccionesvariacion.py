@@ -16,14 +16,27 @@ input_ratio = st.text_input("Ingrese el ticker o la razón de las acciones:", "Y
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
 
-# Function to fetch and compute data for ratios
+# Function to fetch data for all tickers
 def fetch_data(tickers, start_date, end_date):
     data = {}
     for ticker in tickers:
-        data[ticker] = yf.download(ticker, start=start_date, end=end_date)
-        if data[ticker].empty:
+        df = yf.download(ticker, start=start_date, end=end_date)
+        if df.empty:
             st.error(f"No hay datos disponibles para el ticker {ticker} en el rango de fechas seleccionado.")
             return None
+        data[ticker] = df
+    return data
+
+# Function to align dates and fill missing values
+def align_dates(data):
+    # Determine the date range based on the first ticker
+    first_ticker_dates = data[list(data.keys())[0]].index
+    
+    # Reindex all data to the date range of the first ticker
+    for ticker in data:
+        data[ticker] = data[ticker].reindex(first_ticker_dates)
+        data[ticker] = data[ticker].ffill()  # Fill missing values with the previous available data
+    
     return data
 
 # Function to evaluate the ratio expression
@@ -32,11 +45,6 @@ def evaluate_ratio(ratio_str, data):
     tokens = re.split(r'([/*])', ratio_str.replace(' ', ''))
     tickers = [token for token in tokens if token and token not in '/*']
     operators = [token for token in tokens if token in '/*']
-    
-    # Fetch data for all tickers
-    if not all(ticker in data for ticker in tickers):
-        st.error("Faltan datos para algunos tickers en la razón.")
-        return None
     
     # Compute the ratio
     result = None
@@ -53,9 +61,13 @@ def evaluate_ratio(ratio_str, data):
 
 # Process the ratio input
 st.write(f"Obteniendo datos para la razón {input_ratio} desde {start_date} hasta {end_date}...")
-data = fetch_data(re.findall(r'\b\w+\.\w+', input_ratio), start_date, end_date)
+tickers = re.findall(r'\b\w+\.\w+', input_ratio)
+data = fetch_data(tickers, start_date, end_date)
 
 if data:
+    # Align dates and handle missing values
+    data = align_dates(data)
+    
     # Evaluate ratio
     ratio_data = evaluate_ratio(input_ratio, data)
     
