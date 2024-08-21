@@ -45,17 +45,29 @@ def align_dates(data):
 
 # Function to evaluate the ratio expression
 def evaluate_ratio(ratio_str, data):
+    # Handling numbers and operators
     tokens = re.split(r'([/*])', ratio_str.replace(' ', ''))
-    tickers = [token for token in tokens if token and token not in '/*']
+    tokens = [token for token in tokens if token]  # Remove empty strings
+    tickers = [token for token in tokens if token not in '/*']
     operators = [token for token in tokens if token in '/*']
     
-    tickers = [ticker.upper() for ticker in tickers]
+    # Parsing numbers
+    parsed_tokens = []
+    for token in tokens:
+        if re.match(r'\d+', token):  # If token is a number
+            parsed_tokens.append(float(token))
+        else:
+            parsed_tokens.append(token.upper())
+    
+    tickers = [token for token in parsed_tokens if isinstance(token, str)]
+    numbers = [token for token in parsed_tokens if isinstance(token, float)]
     
     missing_tickers = [ticker for ticker in tickers if ticker not in data]
     if missing_tickers:
         st.error(f"Tickers no disponibles en los datos: {', '.join(missing_tickers)}")
         return None
-
+    
+    # Initialize result based on the first ticker
     result = None
     for i, ticker in enumerate(tickers):
         if result is None:
@@ -65,6 +77,13 @@ def evaluate_ratio(ratio_str, data):
                 result *= data[ticker]['Adj Close']
             elif operators[i-1] == '/':
                 result /= data[ticker]['Adj Close']
+    
+    # Apply multipliers and divisors
+    for i, num in enumerate(numbers):
+        if i % 2 == 0:  # Even indices in numbers list are multipliers
+            result *= num
+        else:  # Odd indices in numbers list are divisors
+            result /= num
     
     return result
 
@@ -149,7 +168,7 @@ if data:
         st.pyplot(fig)
 
         # Monthly and yearly average/median changes
-        st.write(f"### Cambios {metric_option} Mensuales")
+        st.write(f"### Cambios Promedio {metric_option} Mensuales")
         if metric_option == "Promedio":
             avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
         else:
@@ -158,12 +177,12 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios {metric_option} Mensuales")
+        ax.set_title(f"Cambios Promedio {metric_option} Mensuales")
         ax.set_xlabel("Mes")
         ax.set_ylabel(f"Cambio {metric_option} Mensual (%)")
         st.pyplot(fig)
 
-        st.write(f"### Cambios {metric_option} Anuales")
+        st.write(f"### Cambios Promedio {metric_option} Anuales")
         if metric_option == "Promedio":
             avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
         else:
@@ -171,7 +190,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios {metric_option} Anuales")
+        ax.set_title(f"Cambios Promedio {metric_option} Anuales")
         ax.set_xlabel("Año")
         ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
         st.pyplot(fig)
