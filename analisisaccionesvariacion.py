@@ -19,7 +19,7 @@ def fetch_data(tickers, start_date, end_date):
     data = {}
     for ticker in tickers:
         ticker = ticker.upper()
-        st.write(f"Descargando datos para el ticker {ticker}...")
+        st.write(f"Intentando descargar datos para el ticker {ticker}...")
         try:
             df = yf.download(ticker, start=start_date, end=end_date)
             if df.empty:
@@ -77,7 +77,7 @@ start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetim
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
 
 # Extract tickers from the input ratio
-tickers = re.findall(r'\b\w+\.\w+', input_ratio)
+tickers = re.findall(r'\b\w+\.\w+|\b\w+', input_ratio)
 data = fetch_data(tickers, start_date, end_date)
 
 if data:
