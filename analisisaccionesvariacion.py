@@ -20,6 +20,7 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 def fetch_data(tickers, start_date, end_date):
     data = {}
     for ticker in tickers:
+        ticker = ticker.upper()  # Ensure ticker is uppercase
         df = yf.download(ticker, start=start_date, end=end_date)
         if df.empty:
             st.error(f"No hay datos disponibles para el ticker {ticker} en el rango de fechas seleccionado.")
@@ -46,6 +47,15 @@ def evaluate_ratio(ratio_str, data):
     tickers = [token for token in tokens if token and token not in '/*']
     operators = [token for token in tokens if token in '/*']
     
+    # Convert all tickers to uppercase
+    tickers = [ticker.upper() for ticker in tickers]
+    
+    # Verify all tickers are in the data
+    for ticker in tickers:
+        if ticker not in data:
+            st.error(f"Ticker {ticker} no disponible en los datos.")
+            return None
+
     # Compute the ratio
     result = None
     for i, ticker in enumerate(tickers):
