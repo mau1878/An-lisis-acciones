@@ -190,7 +190,7 @@ if data:
         ax.set_ylabel(f"Cambio {metric_option} (%)")
         st.pyplot(fig)
         
-        st.write(f"### Cambios Promedio {metric_option} Anuales")
+        st.write(f"### Cambios {metric_option} Anuales")
         if metric_option == "Promedio":
             avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
         else:
