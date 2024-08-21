@@ -9,18 +9,16 @@ from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
 import re
 
-st.title("Análisis de Precios de Acciones")
+# Define custom colormap
+def get_custom_cmap():
+    colors = ['red', 'white', 'green']
+    return LinearSegmentedColormap.from_list('custom_diverging', colors)
 
-# User inputs
-input_ratio = st.text_input("Ingrese el ticker o la razón de las acciones:", "YPFD.BA/YPF")
-start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
-end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
-
-# Function to fetch data for all tickers
+# Function to fetch data
 def fetch_data(tickers, start_date, end_date):
     data = {}
     for ticker in tickers:
-        ticker = ticker.upper()  # Ensure ticker is uppercase
+        ticker = ticker.upper()
         st.write(f"Descargando datos para el ticker {ticker}...")
         try:
             df = yf.download(ticker, start=start_date, end=end_date)
@@ -37,33 +35,27 @@ def align_dates(data):
     if not data:
         return {}
     
-    # Determine the date range based on the first ticker
     first_ticker_dates = data[list(data.keys())[0]].index
     
-    # Reindex all data to the date range of the first ticker
     for ticker in data:
         data[ticker] = data[ticker].reindex(first_ticker_dates)
-        data[ticker] = data[ticker].ffill()  # Fill missing values with the previous available data
+        data[ticker] = data[ticker].ffill()  # Forward fill missing values
     
     return data
 
 # Function to evaluate the ratio expression
 def evaluate_ratio(ratio_str, data):
-    # Extract tickers and operators
     tokens = re.split(r'([/*])', ratio_str.replace(' ', ''))
     tickers = [token for token in tokens if token and token not in '/*']
     operators = [token for token in tokens if token in '/*']
     
-    # Convert all tickers to uppercase
     tickers = [ticker.upper() for ticker in tickers]
     
-    # Verify all tickers are in the data
     missing_tickers = [ticker for ticker in tickers if ticker not in data]
     if missing_tickers:
         st.error(f"Tickers no disponibles en los datos: {', '.join(missing_tickers)}")
         return None
 
-    # Compute the ratio
     result = None
     for i, ticker in enumerate(tickers):
         if result is None:
@@ -76,13 +68,19 @@ def evaluate_ratio(ratio_str, data):
     
     return result
 
-# Process the ratio input
-st.write(f"Obteniendo datos para la razón {input_ratio} desde {start_date} hasta {end_date}...")
+# Streamlit app
+st.title("Análisis de Precios de Acciones")
+
+# User inputs
+input_ratio = st.text_input("Ingrese el ticker o la razón de las acciones:", "YPFD.BA/YPF")
+start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
+end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
+
+# Extract tickers from the input ratio
 tickers = re.findall(r'\b\w+\.\w+', input_ratio)
 data = fetch_data(tickers, start_date, end_date)
 
 if data:
-    # Align dates and handle missing values
     data = align_dates(data)
     
     # Evaluate ratio
@@ -138,8 +136,7 @@ if data:
         monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
         
         # Define a custom colormap with greens for positive values and reds for negative values
-        colors = ['red', 'white', 'green']
-        cmap = LinearSegmentedColormap.from_list('custom_diverging', colors)
+        cmap = get_custom_cmap()
         
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
