@@ -87,7 +87,7 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ypfd_ra
     return result
 
 # Streamlit app
-st.title("Análisis de Precios de Acciones")
+st.title("Análisis de Precios de Acciones - MTaurus - X: https://x.com/MTaurus_ok")
 
 # User option to apply the YPFD.BA/YPF ratio
 apply_ypfd_ratio = st.checkbox("Dividir el ticker principal por dólar CCL de YPF", value=False)
