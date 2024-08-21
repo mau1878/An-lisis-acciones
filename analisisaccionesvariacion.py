@@ -43,57 +43,54 @@ def align_dates(data):
     return data
 
 # Function to evaluate the ratio
-def evaluate_ratio(main_ticker, second_ticker, third_ticker, data):
+def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ypfd_ratio=False):
     if not main_ticker:
         st.error("El ticker principal no puede estar vacío.")
         return None
+    
+    main_ticker = main_ticker.upper()
 
-    # Process the ratio with optional divisors
+    # Apply YPFD.BA/YPF ratio if the option is activated
+    if apply_ypfd_ratio:
+        st.write(f"Aplicando la razón YPFD.BA/YPF al ticker {main_ticker}...")
+        if 'YPFD.BA' in data and 'YPF' in data:
+            result = data[main_ticker]['Adj Close'] / (data['YPFD.BA']['Adj Close'] / data['YPF']['Adj Close'])
+        else:
+            st.error("No hay datos disponibles para YPFD.BA o YPF.")
+            return None
+    else:
+        result = data[main_ticker]['Adj Close']
+
+    # Process the additional ratio with optional divisors
     if second_ticker and third_ticker:
-        main_ticker = main_ticker.upper()
         second_ticker = second_ticker.upper()
         third_ticker = third_ticker.upper()
 
-        if main_ticker in data:
-            result = data[main_ticker]['Adj Close']
-            if second_ticker in data:
-                if third_ticker in data:
-                    result /= (data[second_ticker]['Adj Close'] / data[third_ticker]['Adj Close'])
-                else:
-                    st.error(f"El tercer divisor no está disponible en los datos: {third_ticker}")
-                    return None
+        if second_ticker in data:
+            if third_ticker in data:
+                result /= (data[second_ticker]['Adj Close'] / data[third_ticker]['Adj Close'])
             else:
-                st.error(f"El segundo divisor no está disponible en los datos: {second_ticker}")
+                st.error(f"El tercer divisor no está disponible en los datos: {third_ticker}")
                 return None
         else:
-            st.error(f"El ticker principal no está disponible en los datos: {main_ticker}")
+            st.error(f"El segundo divisor no está disponible en los datos: {second_ticker}")
             return None
     elif second_ticker:
-        main_ticker = main_ticker.upper()
         second_ticker = second_ticker.upper()
 
-        if main_ticker in data:
-            result = data[main_ticker]['Adj Close']
-            if second_ticker in data:
-                result /= data[second_ticker]['Adj Close']
-            else:
-                st.error(f"El segundo divisor no está disponible en los datos: {second_ticker}")
-                return None
+        if second_ticker in data:
+            result /= data[second_ticker]['Adj Close']
         else:
-            st.error(f"El ticker principal no está disponible en los datos: {main_ticker}")
-            return None
-    else:
-        main_ticker = main_ticker.upper()
-        if main_ticker in data:
-            result = data[main_ticker]['Adj Close']
-        else:
-            st.error(f"El ticker principal no está disponible en los datos: {main_ticker}")
+            st.error(f"El segundo divisor no está disponible en los datos: {second_ticker}")
             return None
 
     return result
 
 # Streamlit app
 st.title("Análisis de Precios de Acciones")
+
+# User option to apply the YPFD.BA/YPF ratio
+apply_ypfd_ratio = st.checkbox("Aplicar la razón YPFD.BA/YPF al ticker principal", value=False)
 
 # User inputs
 main_ticker = st.text_input("Ingrese el ticker principal:")
@@ -109,6 +106,8 @@ metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y 
 # Extract tickers from the inputs
 tickers = {main_ticker, second_ticker, third_ticker}
 tickers = {ticker.upper() for ticker in tickers if ticker}
+if apply_ypfd_ratio:
+    tickers.update({'YPFD.BA', 'YPF'})
 
 data = fetch_data(tickers, start_date, end_date)
 
@@ -116,7 +115,7 @@ if data:
     data = align_dates(data)
     
     # Evaluate ratio
-    ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data)
+    ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ypfd_ratio)
     
     if ratio_data is not None:
         # Calculate monthly price variations
@@ -187,21 +186,18 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Mensuales")
-        ax.set_xlabel("Mes")
-        ax.set_ylabel(f"Cambio {metric_option} Mensual (%)")
+        ax.set_title(f"Cambios Promedio {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_ylabel(f"Cambio {metric_option} (%)")
         st.pyplot(fig)
-
+        
         st.write(f"### Cambios Promedio {metric_option} Anuales")
-        yearly_data = ratio_data.resample('Y').ffill()
         if metric_option == "Promedio":
-            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().mean() * 100
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
         else:
-            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().median() * 100
-
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
+        
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Anuales")
-        ax.set_xlabel("Año")
-        ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
+        ax.set_title(f"Cambios Promedio {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_ylabel(f"Cambio {metric_option} (%)")
         st.pyplot(fig)
