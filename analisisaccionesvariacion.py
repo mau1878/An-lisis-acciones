@@ -8,36 +8,36 @@ from scipy.stats import norm
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 
-st.title("Stock Price Analysis")
+st.title("Análisis de Precios de Acciones")
 
 # User inputs
-ticker = st.text_input("Ingrese el ticker del stock:", "AAPL").upper()
+ticker = st.text_input("Ingrese el ticker de la acción:", "AAPL").upper()
 start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
 
 # Fetch stock data
-st.write(f"Fetching data for {ticker} from {start_date} onwards...")
+st.write(f"Obteniendo datos para {ticker} desde {start_date} en adelante...")
 data = yf.download(ticker, start=start_date)
 
 # Check if data is available
 if data.empty:
-    st.error("No data available for the selected stock and date range.")
+    st.error("No hay datos disponibles para la acción y el rango de fechas seleccionados.")
 else:
     # Calculate monthly price variations
     data['Month'] = data.index.to_period('M')
     monthly_data = data.resample('M').ffill()
-    monthly_data['Monthly Change (%)'] = monthly_data['Adj Close'].pct_change() * 100
+    monthly_data['Cambio Mensual (%)'] = monthly_data['Adj Close'].pct_change() * 100
 
     # Plot monthly price variations
-    st.write("### Monthly Price Variations")
-    fig = px.line(monthly_data, x=monthly_data.index, y='Monthly Change (%)',
-                  title=f"Monthly Price Variations of {ticker}",
-                  labels={'Monthly Change (%)': 'Monthly Change (%)'})
+    st.write("### Variaciones Mensuales de Precios")
+    fig = px.line(monthly_data, x=monthly_data.index, y='Cambio Mensual (%)',
+                  title=f"Variaciones Mensuales de {ticker}",
+                  labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'})
     fig.update_traces(mode='lines+markers')
     st.plotly_chart(fig)
 
     # Histogram with Gaussian and percentiles
-    st.write("### Histogram of Monthly Price Variations with Gaussian Fit")
-    monthly_changes = monthly_data['Monthly Change (%)'].dropna()
+    st.write("### Histograma de Variaciones Mensuales con Ajuste de Gauss")
+    monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
 
     fig, ax = plt.subplots(figsize=(10, 6))
     sns.histplot(monthly_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
@@ -54,19 +54,19 @@ else:
     colors = ['red', 'orange', 'green', 'blue', 'purple']
     for i, percentile in enumerate(percentiles):
         perc_value = np.percentile(monthly_changes, percentile)
-        ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}th Percentile')
+        ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
         ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
                 rotation=90, verticalalignment='center', horizontalalignment='right')
 
-    ax.set_title(f"Histogram of {ticker} Monthly Changes with Gaussian Fit")
-    ax.set_xlabel("Monthly Change (%)")
-    ax.set_ylabel("Density")
+    ax.set_title(f"Histograma de Cambios Mensuales de {ticker} con Ajuste de Gauss")
+    ax.set_xlabel("Cambio Mensual (%)")
+    ax.set_ylabel("Densidad")
     ax.legend()
     st.pyplot(fig)
 
     # Heatmap of monthly variations
-    st.write("### Heatmap of Monthly Price Variations")
-    monthly_pivot = monthly_data.pivot_table(values='Monthly Change (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
+    st.write("### Mapa de Calor de Variaciones Mensuales")
+    monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
     
     # Define a custom colormap with greens for positive values and reds for negative values
     colors = ['red', 'white', 'green']
@@ -74,33 +74,33 @@ else:
     
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-    plt.title(f"Heatmap of Monthly Price Variations for {ticker}")
-    plt.xlabel("Month")
-    plt.ylabel("Year")
+    plt.title(f"Mapa de Calor de Variaciones Mensuales para {ticker}")
+    plt.xlabel("Mes")
+    plt.ylabel("Año")
     st.pyplot(fig)
 
     # Monthly and yearly average changes
-    st.write("### Average Monthly Changes")
-    avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Monthly Change (%)'].mean()
+    st.write("### Cambios Promedio Mensuales")
+    avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
     avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
     
     fig, ax = plt.subplots(figsize=(10, 6))
     avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-    ax.set_title("Average Monthly Changes")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Average Monthly Change (%)")
+    ax.set_title("Cambios Promedio Mensuales")
+    ax.set_xlabel("Mes")
+    ax.set_ylabel("Cambio Promedio Mensual (%)")
     st.pyplot(fig)
 
-    st.write("### Average Yearly Changes")
-    avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Monthly Change (%)'].mean()
+    st.write("### Cambios Promedio Anuales")
+    avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
     
     fig, ax = plt.subplots(figsize=(10, 6))
     avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-    ax.set_title("Average Yearly Changes")
-    ax.set_xlabel("Year")
-    ax.set_ylabel("Average Yearly Change (%)")
+    ax.set_title("Cambios Promedio Anuales")
+    ax.set_xlabel("Año")
+    ax.set_ylabel("Cambio Promedio Anual (%)")
     st.pyplot(fig)
 
     # Display statistical summary
-    st.write("### Statistical Summary")
+    st.write("### Resumen Estadístico")
     st.write(monthly_changes.describe())
