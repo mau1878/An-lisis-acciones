@@ -48,12 +48,13 @@ else:
     p = norm.pdf(x, mu, std)
     ax.plot(x, p, 'k', linewidth=2)
     
-    # Percentiles
+    # Percentiles with different colors
     percentiles = [5, 25, 50, 75, 95]
-    for percentile in percentiles:
+    colors = ['red', 'orange', 'green', 'blue', 'purple']
+    for i, percentile in enumerate(percentiles):
         perc_value = np.percentile(monthly_changes, percentile)
-        ax.axvline(perc_value, color='red', linestyle='--', label=f'{percentile}th Percentile')
-        ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color='red')
+        ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}th Percentile')
+        ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i], verticalalignment='bottom')
 
     ax.set_title(f"Histogram of {ticker} Monthly Changes with Gaussian Fit")
     ax.set_xlabel("Monthly Change (%)")
@@ -64,8 +65,12 @@ else:
     # Heatmap of monthly variations
     st.write("### Heatmap of Monthly Price Variations")
     monthly_pivot = monthly_data.pivot_table(values='Monthly Change (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
-    fig = plt.figure(figsize=(12, 8))
-    sns.heatmap(monthly_pivot, cmap="YlGnBu", annot=True, fmt=".2f", linewidths=0.5)
+    
+    # Define a custom colormap with greens for positive values and reds for negative values
+    cmap = sns.diverging_palette(240, 10, as_cmap=True)
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
     plt.title(f"Heatmap of Monthly Price Variations for {ticker}")
     plt.xlabel("Month")
     plt.ylabel("Year")
