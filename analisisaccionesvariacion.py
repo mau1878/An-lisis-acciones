@@ -45,9 +45,10 @@ def align_dates(data):
 
 # Function to evaluate the ratio expression
 def evaluate_ratio(ratio_str, data):
-    # Extract numbers and tickers from ratio string
-    tokens = re.findall(r'[A-Z0-9\.]+|[/*]', ratio_str.replace(' ', ''))
+    # Extract tickers, numbers, and operators from ratio string
+    tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/]|\d+(\.\d+)?', ratio_str.replace(' ', ''))
     
+    # Initialize lists
     tickers = []
     operators = []
     numbers = []
@@ -55,7 +56,7 @@ def evaluate_ratio(ratio_str, data):
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        if token in '/*':
+        if token in '+-*/':
             operators.append(token)
         elif re.match(r'\d+(\.\d+)?', token):  # If token is a number
             numbers.append(float(token))
@@ -64,13 +65,13 @@ def evaluate_ratio(ratio_str, data):
         
         i += 1
     
-    # Check missing tickers
+    # Check for missing tickers
     missing_tickers = [ticker for ticker in tickers if ticker not in data]
     if missing_tickers:
         st.error(f"Tickers no disponibles en los datos: {', '.join(missing_tickers)}")
         return None
     
-    # Initialize result based on the first ticker
+    # Evaluate the ratio
     result = None
     for i, ticker in enumerate(tickers):
         if result is None:
@@ -81,7 +82,7 @@ def evaluate_ratio(ratio_str, data):
             elif operators[i-1] == '/':
                 result /= data[ticker]['Adj Close']
     
-    # Apply multipliers and divisors
+    # Apply numbers as multipliers or divisors
     for i, num in enumerate(numbers):
         if i % 2 == 0:  # Even indices in numbers list are multipliers
             result *= num
@@ -103,7 +104,7 @@ metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y 
 
 # Extract tickers and numbers from the input ratio
 def extract_tickers_and_numbers(ratio_str):
-    tokens = re.findall(r'[A-Z0-9\.]+|[/*\d]', ratio_str.replace(' ', ''))
+    tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/]|\d+(\.\d+)?', ratio_str.replace(' ', ''))
     
     tickers = []
     operators = []
@@ -112,7 +113,7 @@ def extract_tickers_and_numbers(ratio_str):
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        if token in '/*':
+        if token in '+-*/':
             operators.append(token)
         elif re.match(r'\d+(\.\d+)?', token):  # If token is a number
             numbers.append(float(token))
