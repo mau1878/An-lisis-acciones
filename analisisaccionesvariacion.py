@@ -49,7 +49,7 @@ else:
     ax.plot(x, p, 'k', linewidth=2)
     
     # Percentiles
-    percentiles = [25, 50, 75]
+    percentiles = [5, 25, 50, 75, 95]
     for percentile in percentiles:
         perc_value = np.percentile(monthly_changes, percentile)
         ax.axvline(perc_value, color='red', linestyle='--', label=f'{percentile}th Percentile')
@@ -59,6 +59,16 @@ else:
     ax.set_xlabel("Monthly Change (%)")
     ax.set_ylabel("Density")
     ax.legend()
+    st.pyplot(fig)
+
+    # Heatmap of monthly variations
+    st.write("### Heatmap of Monthly Price Variations")
+    monthly_pivot = monthly_data.pivot_table(values='Monthly Change (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
+    fig = plt.figure(figsize=(12, 8))
+    sns.heatmap(monthly_pivot, cmap="YlGnBu", annot=True, fmt=".2f", linewidths=0.5)
+    plt.title(f"Heatmap of Monthly Price Variations for {ticker}")
+    plt.xlabel("Month")
+    plt.ylabel("Year")
     st.pyplot(fig)
 
     # Display statistical summary
