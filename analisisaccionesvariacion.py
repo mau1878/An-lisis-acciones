@@ -21,7 +21,9 @@ def fetch_data(tickers, start_date, end_date):
     data = {}
     for ticker in tickers:
         ticker = ticker.upper()  # Ensure ticker is uppercase
+        st.write(f"Descargando datos para el ticker {ticker}...")
         df = yf.download(ticker, start=start_date, end=end_date)
+        
         if df.empty:
             st.error(f"No hay datos disponibles para el ticker {ticker} en el rango de fechas seleccionado.")
             return None
@@ -51,10 +53,10 @@ def evaluate_ratio(ratio_str, data):
     tickers = [ticker.upper() for ticker in tickers]
     
     # Verify all tickers are in the data
-    for ticker in tickers:
-        if ticker not in data:
-            st.error(f"Ticker {ticker} no disponible en los datos.")
-            return None
+    missing_tickers = [ticker for ticker in tickers if ticker not in data]
+    if missing_tickers:
+        st.error(f"Tickers no disponibles en los datos: {', '.join(missing_tickers)}")
+        return None
 
     # Compute the ratio
     result = None
