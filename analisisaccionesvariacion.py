@@ -102,8 +102,9 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
 # Extract tickers and numbers from the input ratio
-ratios_and_tickers = re.findall(r'[A-Z0-9\.]+|[/*]', input_ratio.replace(' ', ''))
-tickers = [token.upper() for token in ratios_and_tickers if re.match(r'[A-Z0-9\.]+', token) and not re.match(r'\d+', token)]
+tokens = re.findall(r'[A-Z0-9\.]+|[/*]', input_ratio.replace(' ', ''))
+tickers = [token.upper() for token in tokens if re.match(r'[A-Z0-9\.]+', token) and not re.match(r'\d+', token)]
+numbers = [float(token) for token in tokens if re.match(r'\d+(\.\d+)?', token)]
 data = fetch_data(tickers, start_date, end_date)
 
 if data:
