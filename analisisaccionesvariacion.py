@@ -48,7 +48,7 @@ def evaluate_ratio(ratio_str, data):
     # Handling numbers and operators
     tokens = re.split(r'([/*])', ratio_str.replace(' ', ''))
     tokens = [token for token in tokens if token]  # Remove empty strings
-    tickers = [token for token in tokens if token not in '/*']
+    tickers = [token for token in tokens if token not in '/*' and not re.match(r'\d+', token)]
     operators = [token for token in tokens if token in '/*']
     
     # Parsing numbers
@@ -99,7 +99,7 @@ end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('to
 metric_option = st.radio("Seleccione la métrica para los gráficos mensuales y anuales:", ("Promedio", "Mediana"))
 
 # Extract tickers from the input ratio
-tickers = re.findall(r'\b\w+\.\w+|\b\w+', input_ratio)
+tickers = [token.upper() for token in re.findall(r'\b\w+\.\w+|\b\w+', input_ratio) if not re.match(r'\d+', token)]
 data = fetch_data(tickers, start_date, end_date)
 
 if data:
@@ -194,7 +194,3 @@ if data:
         ax.set_xlabel("Año")
         ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
         st.pyplot(fig)
-
-        # Display statistical summary
-        st.write("### Resumen Estadístico")
-        st.write(monthly_changes.describe())
