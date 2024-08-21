@@ -46,15 +46,23 @@ def align_dates(data):
 
 # Function to evaluate the ratio expression
 def evaluate_ratio(ratio_str, data):
-    # Replace ticker symbols with their data
+    # Remove spaces
+    ratio_str = ratio_str.replace(' ', '')
+    
+    # Define function to handle mathematical expressions
     def eval_expr(expr):
-        # Safe eval function for simple mathematical expressions
-        return eval(expr, {"__builtins__": None}, data)
+        # Evaluate expression safely using pandas
+        try:
+            result = eval(expr, {"__builtins__": None}, data)
+            return result
+        except Exception as e:
+            st.error(f"Error al evaluar la expresión {expr}: {e}")
+            return None
     
     # Tokenize the ratio string and parse
     def parse_ratio(ratio_str):
         # Replace common tickers with their data
-        tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/\(\)]|\d+(\.\d+)?', ratio_str.replace(' ', ''))
+        tokens = re.findall(r'[A-Z0-9\.]+|[\+\-\*/\(\)]|\d+(\.\d+)?', ratio_str)
         expr = ""
         for token in tokens:
             if token in '+-*/()':
@@ -73,12 +81,7 @@ def evaluate_ratio(ratio_str, data):
     
     expr = parse_ratio(ratio_str)
     if expr:
-        try:
-            result = eval_expr(expr)
-            return result
-        except Exception as e:
-            st.error(f"Error al evaluar la expresión {expr}: {e}")
-            return None
+        return eval_expr(expr)
     return None
 
 # Streamlit app
