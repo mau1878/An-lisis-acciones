@@ -123,7 +123,7 @@ if data:
         ratio_data = ratio_data.to_frame(name='Adjusted Close')
         ratio_data.index = pd.to_datetime(ratio_data.index)
         ratio_data['Month'] = ratio_data.index.to_period('M')
-        monthly_data = ratio_data.resample('M').ffill()
+        monthly_data = ratio_data.resample('ME').ffill()
         monthly_data['Cambio Mensual (%)'] = monthly_data['Adjusted Close'].pct_change() * 100
 
         # Plot monthly price variations
@@ -173,35 +173,6 @@ if data:
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
         plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-        plt.xlabel("Mes")
-        plt.ylabel("Año")
-        st.pyplot(fig)
-
-        # Monthly and yearly average/median changes
-        st.write(f"### Cambios Promedio {metric_option} Mensuales")
-        if metric_option == "Promedio":
-            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
-        else:
-            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].median()
-        avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Mensuales")
-        ax.set_xlabel("Mes")
-        ax.set_ylabel(f"Cambio {metric_option} Mensual (%)")
-        st.pyplot(fig)
-
-        st.write(f"### Cambios Promedio {metric_option} Anuales")
-        yearly_data = ratio_data.resample('Y').ffill()
-        if metric_option == "Promedio":
-            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().mean() * 100
-        else:
-            avg_yearly_changes = yearly_data.groupby(yearly_data.index.year)['Adjusted Close'].pct_change().median() * 100
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Anuales")
-        ax.set_xlabel("Año")
-        ax.set_ylabel(f"Cambio {metric_option} Anual (%)")
+        plt.xlabel('Mes')
+        plt.ylabel('Año')
         st.pyplot(fig)
