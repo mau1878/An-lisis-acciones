@@ -238,34 +238,47 @@ if data:
         ax.set_ylabel("Número de Valores")
         st.pyplot(fig)
        
-        # NEW: Ranking of the longest positive and negative streaks
-        st.write("### Ranking de Rachas Positivas y Negativas más Largas")
-
+        # Existing functions and code
+        
+        # Updated calculate_streaks function
         def calculate_streaks(data):
             streaks = []
-            current_streak = {'start': None, 'end': None, 'length': 0, 'type': None}
-
-            for i in range(1, len(data)):
-                change = data[i]
-
-                if current_streak['type'] is None:
-                    current_streak['start'] = data.index[i]
-                    current_streak['type'] = 'positive' if change > 0 else 'negative'
-
-                if (change > 0 and current_streak['type'] == 'positive') or (change < 0 and current_streak['type'] == 'negative'):
-                    current_streak['length'] += 1
-                    current_streak['end'] = data.index[i]
-                else:
-                    streaks.append(current_streak.copy())
-                    current_streak['start'] = data.index[i]
-                    current_streak['end'] = None
+            current_streak = {'value': None, 'start': None, 'end': None, 'length': 0}
+            
+            for i in range(len(data)):
+                if current_streak['value'] is None:
+                    # Initialize the first streak
+                    current_streak['value'] = data[i]
+                    current_streak['start'] = i
+                    current_streak['end'] = i
                     current_streak['length'] = 1
-                    current_streak['type'] = 'positive' if change > 0 else 'negative'
-
-            streaks.append(current_streak)
+                elif data[i] == current_streak['value']:
+                    # Continue the current streak
+                    current_streak['end'] = i
+                    current_streak['length'] += 1
+                else:
+                    # End the current streak and start a new one
+                    streaks.append(current_streak)
+                    current_streak = {
+                        'value': data[i],
+                        'start': i,
+                        'end': i,
+                        'length': 1
+                    }
+            
+            # Append the last streak
+            if current_streak['length'] > 0:
+                streaks.append(current_streak)
+            
+            # Convert start and end indices to datetime if data is a Pandas Series with datetime index
+            if isinstance(data, pd.Series) and isinstance(data.index, pd.DatetimeIndex):
+                for streak in streaks:
+                    streak['start'] = data.index[streak['start']]
+                    streak['end'] = data.index[streak['end']]
+            
             return streaks
-
-        # Calculate streaks
+        
+        # Apply the function to your data
         streaks = calculate_streaks(monthly_data['Cambio Mensual (%)'].dropna().values)
         streaks_df = pd.DataFrame(streaks)
         
