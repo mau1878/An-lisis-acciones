@@ -240,7 +240,8 @@ if data:
        
         # Existing functions and code
         # Updated calculate_streaks function
-# Updated calculate_streaks function
+        # Updated calculate_streaks function
+        # Updated calculate_streaks function
         def calculate_streaks(data):
             streaks = []
             current_streak = {'value': None, 'start': None, 'end': None, 'length': 0}
@@ -252,8 +253,8 @@ if data:
                     current_streak['start'] = i
                     current_streak['end'] = i
                     current_streak['length'] = 1
-                elif data[i] == current_streak['value']:
-                    # Continue the current streak
+                elif (data[i] > 0 and current_streak['value'] > 0) or (data[i] <= 0 and current_streak['value'] <= 0):
+                    # Continue the current streak if the value direction is the same
                     current_streak['end'] = i
                     current_streak['length'] += 1
                 else:
