@@ -210,12 +210,12 @@ if data:
 
         # Heatmap for monthly variations
         st.write("### Mapa de Calor de Variaciones Mensuales")
-        heatmap_data = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.month, columns=monthly_data.index.year)
+        heatmap_data = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month)
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.heatmap(heatmap_data, cmap=get_custom_cmap(), annot=True, fmt='.1f', linewidths=.5, ax=ax)
         ax.set_title('Mapa de Calor de Variaciones Mensuales')
-        ax.set_xlabel('Año')
-        ax.set_ylabel('Mes')
+        ax.set_xlabel('Mes')
+        ax.set_ylabel('Año')
         st.pyplot(fig)
 
         # Calculate yearly streaks
