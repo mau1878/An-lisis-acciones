@@ -93,7 +93,7 @@ st.title("Análisis de Precios de Acciones - MTaurus - X: https://x.com/MTaurus_
 apply_ypfd_ratio = st.checkbox("Dividir el ticker principal por dólar CCL de YPF", value=False)
 
 # User inputs
-main_ticker = st.text_input("Ingrese el ticker principal (por ejemplo GGAL.BA o METR.BA o AAPL o BMA:")
+main_ticker = st.text_input("Ingrese el ticker principal (por ejemplo GGAL.BA o METR.BA o AAPL o BMA):")
 second_ticker = st.text_input("Ingrese el segundo ticker o ratio divisor (opcional):")
 third_ticker = st.text_input("Ingrese el tercer ticker o ratio divisor (opcional):")
 
@@ -186,11 +186,11 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_title(f"Cambios {metric_option} Mensuales")
         ax.set_xlabel("Mes")
-        ax.set_ylabel(f"{metric_option} de Cambio Mensual (%)")
+        ax.set_ylabel(f"Cambio {metric_option} (%)")
         st.pyplot(fig)
-        
+
         st.write(f"### Cambios {metric_option} Anuales")
         if metric_option == "Promedio":
             avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
@@ -199,133 +199,50 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_title(f"Cambios {metric_option} Anuales")
         ax.set_xlabel("Año")
-        ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
+        ax.set_ylabel(f"Cambio {metric_option} (%)")
         st.pyplot(fig)
 
-        # NEW: Rank months by the number of positive and negative values
-        st.write("### Ranking de Meses por Número de Valores Positivos y Negativos")
-        monthly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x > 0).sum())
-        monthly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x < 0).sum())
-        
-        monthly_rank_df = pd.DataFrame({
-            'Mes': pd.to_datetime(monthly_positive_count.index, format='%m').strftime('%B'),
-            'Positivos': monthly_positive_count.values,
-            'Negativos': monthly_negative_count.values
-        }).sort_values(by='Positivos', ascending=False)
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        monthly_rank_df.set_index('Mes')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
-        ax.set_title("Ranking de Meses por Número de Valores Positivos y Negativos")
-        ax.set_ylabel("Número de Valores")
-        st.pyplot(fig)
+        # Ranking of months and years by the number of positive and negative values
+        st.write("### Ranking de Meses y Años")
+        month_rank = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].apply(lambda x: (x > 0).sum())
+        year_rank = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].apply(lambda x: (x > 0).sum())
 
-        # NEW: Rank years by the number of positive and negative values
-        st.write("### Ranking de Años por Número de Valores Positivos y Negativos")
-        yearly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x > 0).sum())
-        yearly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x < 0).sum())
-        
-        yearly_rank_df = pd.DataFrame({
-            'Año': yearly_positive_count.index,
-            'Positivos': yearly_positive_count.values,
-            'Negativos': yearly_negative_count.values
-        }).sort_values(by='Positivos', ascending=False)
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        yearly_rank_df.set_index('Año')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
-        ax.set_title("Ranking de Años por Número de Valores Positivos y Negativos")
-        ax.set_ylabel("Número de Valores")
-        st.pyplot(fig)
-        # ... (existing code remains unchanged)
+        st.write(f"#### Ranking de Meses por Número de Valores Positivos")
+        st.write(month_rank.sort_values(ascending=False))
 
-        # NEW: Ranking of Longest Positive and Negative Streaks
-        def find_longest_streaks(series):
-            # Find streaks of consecutive values above or below 0
-            streaks = {'Positive': [], 'Negative': []}
-            current_streak = {'Positive': 0, 'Negative': 0}
-            current_streak_start = {'Positive': None, 'Negative': None}
-            
-            for date, value in series.iteritems():
+        st.write(f"#### Ranking de Años por Número de Valores Positivos")
+        st.write(year_rank.sort_values(ascending=False))
+
+        # Longest streaks
+        def longest_streak(series):
+            streaks = []
+            current_streak = 0
+            for value in series:
                 if value > 0:
-                    if current_streak['Negative'] > 0:
-                        streaks['Negative'].append({
-                            'Start Date': current_streak_start['Negative'],
-                            'End Date': date - pd.DateOffset(1),
-                            'Length': current_streak['Negative']
-                        })
-                        current_streak['Negative'] = 0
-                        current_streak_start['Negative'] = None
-                    
-                    if current_streak['Positive'] == 0:
-                        current_streak_start['Positive'] = date
-                    current_streak['Positive'] += 1
-                elif value < 0:
-                    if current_streak['Positive'] > 0:
-                        streaks['Positive'].append({
-                            'Start Date': current_streak_start['Positive'],
-                            'End Date': date - pd.DateOffset(1),
-                            'Length': current_streak['Positive']
-                        })
-                        current_streak['Positive'] = 0
-                        current_streak_start['Positive'] = None
-                    
-                    if current_streak['Negative'] == 0:
-                        current_streak_start['Negative'] = date
-                    current_streak['Negative'] += 1
+                    current_streak += 1
                 else:
-                    if current_streak['Positive'] > 0:
-                        streaks['Positive'].append({
-                            'Start Date': current_streak_start['Positive'],
-                            'End Date': date - pd.DateOffset(1),
-                            'Length': current_streak['Positive']
-                        })
-                        current_streak['Positive'] = 0
-                        current_streak_start['Positive'] = None
-                    
-                    if current_streak['Negative'] > 0:
-                        streaks['Negative'].append({
-                            'Start Date': current_streak_start['Negative'],
-                            'End Date': date - pd.DateOffset(1),
-                            'Length': current_streak['Negative']
-                        })
-                        current_streak['Negative'] = 0
-                        current_streak_start['Negative'] = None
-            
-            # Account for streaks that end at the last date
-            if current_streak['Positive'] > 0:
-                streaks['Positive'].append({
-                    'Start Date': current_streak_start['Positive'],
-                    'End Date': date,
-                    'Length': current_streak['Positive']
-                })
-            if current_streak['Negative'] > 0:
-                streaks['Negative'].append({
-                    'Start Date': current_streak_start['Negative'],
-                    'End Date': date,
-                    'Length': current_streak['Negative']
-                })
-            
-            return streaks
-        
-        streaks = find_longest_streaks(monthly_data['Cambio Mensual (%)'])
-        
-        # Convert streaks to DataFrame and display
-        st.write("### Ranking de Rachas Positivas y Negativas")
-        if streaks:
-            # Process Positive Streaks
-            positive_streaks_df = pd.DataFrame(streaks['Positive'])
-            positive_streaks_df = positive_streaks_df.sort_values(by='Length', ascending=False)
-            positive_streaks_df.reset_index(drop=True, inplace=True)
-            
-            # Process Negative Streaks
-            negative_streaks_df = pd.DataFrame(streaks['Negative'])
-            negative_streaks_df = negative_streaks_df.sort_values(by='Length', ascending=False)
-            negative_streaks_df.reset_index(drop=True, inplace=True)
-            
-            # Display tables
-            st.write("#### Ranking de Rachas Positivas")
-            st.dataframe(positive_streaks_df, use_container_width=True)
-            
-            st.write("#### Ranking de Rachas Negativas")
-            st.dataframe(negative_streaks_df, use_container_width=True)
+                    if current_streak > 0:
+                        streaks.append(current_streak)
+                    current_streak = 0
+            if current_streak > 0:
+                streaks.append(current_streak)
+            return max(streaks) if streaks else 0
+
+        month_streaks = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].apply(longest_streak)
+        year_streaks = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].apply(longest_streak)
+
+        st.write(f"#### Mayor Racha Positiva de Meses")
+        st.write(month_streaks.sort_values(ascending=False))
+
+        st.write(f"#### Mayor Racha Positiva de Años")
+        st.write(year_streaks.sort_values(ascending=False))
+
+        st.write(f"#### Mayor Racha Negativa de Meses")
+        month_streaks_neg = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].apply(lambda x: longest_streak(-x))
+        st.write(month_streaks_neg.sort_values(ascending=False))
+
+        st.write(f"#### Mayor Racha Negativa de Años")
+        year_streaks_neg = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].apply(lambda x: longest_streak(-x))
+        st.write(year_streaks_neg.sort_values(ascending=False))
