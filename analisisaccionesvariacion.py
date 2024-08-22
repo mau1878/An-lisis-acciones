@@ -240,6 +240,7 @@ if data:
        
         # Existing functions and code
         # Updated calculate_streaks function
+# Updated calculate_streaks function
         def calculate_streaks(data):
             streaks = []
             current_streak = {'value': None, 'start': None, 'end': None, 'length': 0}
@@ -318,3 +319,4 @@ if data:
         
         st.write("#### Rachas Negativas más Largas")
         st.dataframe(top_negative_streaks[['start', 'end', 'length']].rename(columns={'start': 'Inicio', 'end': 'Fin', 'length': 'Duración (meses)'}))
+
