@@ -237,3 +237,49 @@ if data:
         ax.set_title("Ranking de Años por Número de Valores Positivos y Negativos")
         ax.set_ylabel("Número de Valores")
         st.pyplot(fig)
+       
+        # NEW: Ranking of the longest positive and negative streaks
+        st.write("### Ranking de Rachas Positivas y Negativas más Largas")
+
+        def calculate_streaks(data):
+            streaks = []
+            current_streak = {'start': None, 'end': None, 'length': 0, 'type': None}
+
+            for i in range(1, len(data)):
+                change = data[i]
+
+                if current_streak['type'] is None:
+                    current_streak['start'] = data.index[i]
+                    current_streak['type'] = 'positive' if change > 0 else 'negative'
+
+                if (change > 0 and current_streak['type'] == 'positive') or (change < 0 and current_streak['type'] == 'negative'):
+                    current_streak['length'] += 1
+                    current_streak['end'] = data.index[i]
+                else:
+                    streaks.append(current_streak.copy())
+                    current_streak['start'] = data.index[i]
+                    current_streak['end'] = None
+                    current_streak['length'] = 1
+                    current_streak['type'] = 'positive' if change > 0 else 'negative'
+
+            streaks.append(current_streak)
+            return streaks
+
+        # Calculate streaks
+        streaks = calculate_streaks(monthly_data['Cambio Mensual (%)'].dropna().values)
+        streaks_df = pd.DataFrame(streaks)
+        
+        # Separate positive and negative streaks
+        positive_streaks = streaks_df[streaks_df['type'] == 'positive'].sort_values(by='length', ascending=False)
+        negative_streaks = streaks_df[streaks_df['type'] == 'negative'].sort_values(by='length', ascending=False)
+        
+        # Select top 10 longest streaks
+        top_positive_streaks = positive_streaks.head(10).reset_index(drop=True)
+        top_negative_streaks = negative_streaks.head(10).reset_index(drop=True)
+
+        # Display the streaks in a table format
+        st.write("#### Rachas Positivas más Largas")
+        st.dataframe(top_positive_streaks[['start', 'end', 'length']].rename(columns={'start': 'Inicio', 'end': 'Fin', 'length': 'Duración (meses)'}))
+
+        st.write("#### Rachas Negativas más Largas")
+        st.dataframe(top_negative_streaks[['start', 'end', 'length']].rename(columns={'start': 'Inicio', 'end': 'Fin', 'length': 'Duración (meses)'}))
