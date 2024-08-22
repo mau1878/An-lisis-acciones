@@ -187,7 +187,8 @@ if data:
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
         ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-        ax.set_ylabel(f"Cambio {metric_option} (%)")
+        ax.set_xlabel("Mes")
+        ax.set_ylabel(f"{metric_option} de Cambio Mensual (%)")
         st.pyplot(fig)
         
         st.write(f"### Cambios {metric_option} Anuales")
@@ -198,6 +199,41 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios Promedio {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-        ax.set_ylabel(f"Cambio {metric_option} (%)")
+        ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_xlabel("Año")
+        ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
+        st.pyplot(fig)
+
+        # NEW: Rank months by the number of positive and negative values
+        st.write("### Ranking de Meses por Número de Valores Positivos y Negativos")
+        monthly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x > 0).sum())
+        monthly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x < 0).sum())
+        
+        monthly_rank_df = pd.DataFrame({
+            'Mes': pd.to_datetime(monthly_positive_count.index, format='%m').strftime('%B'),
+            'Positivos': monthly_positive_count.values,
+            'Negativos': monthly_negative_count.values
+        }).sort_values(by='Positivos', ascending=False)
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        monthly_rank_df.set_index('Mes')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
+        ax.set_title("Ranking de Meses por Número de Valores Positivos y Negativos")
+        ax.set_ylabel("Número de Valores")
+        st.pyplot(fig)
+
+        # NEW: Rank years by the number of positive and negative values
+        st.write("### Ranking de Años por Número de Valores Positivos y Negativos")
+        yearly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x > 0).sum())
+        yearly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x < 0).sum())
+        
+        yearly_rank_df = pd.DataFrame({
+            'Año': yearly_positive_count.index,
+            'Positivos': yearly_positive_count.values,
+            'Negativos': yearly_negative_count.values
+        }).sort_values(by='Positivos', ascending=False)
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        yearly_rank_df.set_index('Año')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
+        ax.set_title("Ranking de Años por Número de Valores Positivos y Negativos")
+        ax.set_ylabel("Número de Valores")
         st.pyplot(fig)
