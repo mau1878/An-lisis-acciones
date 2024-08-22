@@ -239,7 +239,6 @@ if data:
         st.pyplot(fig)
        
         # Existing functions and code
-        
         # Updated calculate_streaks function
         def calculate_streaks(data):
             streaks = []
@@ -307,21 +306,15 @@ if data:
             positive_streaks = pd.DataFrame()
             negative_streaks = pd.DataFrame()
         
-        # Continue with the rest of your code...
-
-        streaks_df = pd.DataFrame(streaks)
-        
-        # Separate positive and negative streaks
-        positive_streaks = streaks_df[streaks_df['type'] == 'positive'].sort_values(by='length', ascending=False)
-        negative_streaks = streaks_df[streaks_df['type'] == 'negative'].sort_values(by='length', ascending=False)
-        
         # Select top 10 longest streaks
         top_positive_streaks = positive_streaks.head(10).reset_index(drop=True)
         top_negative_streaks = negative_streaks.head(10).reset_index(drop=True)
-
+        
         # Display the streaks in a table format
         st.write("#### Rachas Positivas más Largas")
         st.dataframe(top_positive_streaks[['start', 'end', 'length']].rename(columns={'start': 'Inicio', 'end': 'Fin', 'length': 'Duración (meses)'}))
-
+        
         st.write("#### Rachas Negativas más Largas")
         st.dataframe(top_negative_streaks[['start', 'end', 'length']].rename(columns={'start': 'Inicio', 'end': 'Fin', 'length': 'Duración (meses)'}))
+        
+        
