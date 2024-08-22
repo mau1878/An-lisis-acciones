@@ -279,7 +279,36 @@ if data:
             return streaks
         
         # Apply the function to your data
+        # Calculate streaks from the monthly data
         streaks = calculate_streaks(monthly_data['Cambio Mensual (%)'].dropna().values)
+        
+        # Ensure the streaks list is correctly structured
+        streaks_data = []
+        
+        for streak in streaks:
+            streak_type = 'positive' if streak['value'] > 0 else 'negative'
+            streaks_data.append({
+                'type': streak_type,
+                'start': streak['start'],
+                'end': streak['end'],
+                'length': streak['length']
+            })
+        
+        # Create DataFrame from the streaks list
+        streaks_df = pd.DataFrame(streaks_data)
+        
+        # Check if 'type' column exists before filtering
+        if 'type' in streaks_df.columns:
+            positive_streaks = streaks_df[streaks_df['type'] == 'positive'].sort_values(by='length', ascending=False)
+            negative_streaks = streaks_df[streaks_df['type'] == 'negative'].sort_values(by='length', ascending=False)
+        else:
+            # Handle the case where the 'type' column is missing
+            st.warning("The 'type' column is missing in the streaks DataFrame. No streaks to analyze.")
+            positive_streaks = pd.DataFrame()
+            negative_streaks = pd.DataFrame()
+        
+        # Continue with the rest of your code...
+
         streaks_df = pd.DataFrame(streaks)
         
         # Separate positive and negative streaks
