@@ -86,53 +86,6 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ypfd_ra
 
     return result
 
-# Function to compute streaks
-def compute_streaks(data):
-    streaks = {'positive': [], 'negative': []}
-    current_streak = {'positive': 0, 'negative': 0}
-    
-    for change in data:
-        if change > 0:
-            if current_streak['negative'] > 0:
-                streaks['negative'].append(current_streak['negative'])
-                current_streak['negative'] = 0
-            current_streak['positive'] += 1
-        elif change < 0:
-            if current_streak['positive'] > 0:
-                streaks['positive'].append(current_streak['positive'])
-                current_streak['positive'] = 0
-            current_streak['negative'] += 1
-        else:
-            if current_streak['positive'] > 0:
-                streaks['positive'].append(current_streak['positive'])
-                current_streak['positive'] = 0
-            if current_streak['negative'] > 0:
-                streaks['negative'].append(current_streak['negative'])
-                current_streak['negative'] = 0
-                
-    if current_streak['positive'] > 0:
-        streaks['positive'].append(current_streak['positive'])
-    if current_streak['negative'] > 0:
-        streaks['negative'].append(current_streak['negative'])
-    
-    return streaks
-
-# Function to aggregate streaks by year
-def aggregate_streaks_by_year(data):
-    yearly_streaks = {}
-    
-    for year in data.index.year.unique():
-        year_data = data[data.index.year == year]['Cambio Mensual (%)']
-        streaks = compute_streaks(year_data)
-        yearly_streaks[year] = {
-            'positive_streaks': len(streaks['positive']),
-            'negative_streaks': len(streaks['negative']),
-            'longest_positive_streak': max(streaks['positive'], default=0),
-            'longest_negative_streak': max(streaks['negative'], default=0)
-        }
-    
-    return pd.DataFrame.from_dict(yearly_streaks, orient='index').sort_index()
-
 # Streamlit app
 st.title("Análisis de Precios de Acciones - MTaurus - X: https://x.com/MTaurus_ok")
 
@@ -196,56 +149,91 @@ if data:
         
         # Percentiles with different colors and vertical labels
         percentiles = [5, 25, 50, 75, 95]
-        colors = ['red', 'orange', 'green', 'orange', 'red']
-        for perc, color in zip(percentiles, colors):
-            value = np.percentile(monthly_changes, perc)
-            ax.axvline(value, color=color, linestyle='dashed')
-            ax.text(value, 0.02, f'{perc}th Pct', color=color, rotation=90, verticalalignment='center')
-        
-        ax.set_title('Histograma con Ajuste de Gauss')
-        ax.set_xlabel('Cambio Mensual (%)')
-        ax.set_ylabel('Densidad')
+        colors = ['red', 'orange', 'green', 'blue', 'purple']
+        for i, percentile in enumerate(percentiles):
+            perc_value = np.percentile(monthly_changes, percentile)
+            ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
+            ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
+                    rotation=90, verticalalignment='center', horizontalalignment='right')
+
+        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
+        ax.set_xlabel("Cambio Mensual (%)")
+        ax.set_ylabel("Densidad")
         ax.legend()
         st.pyplot(fig)
 
-        # Heatmap for monthly variations
+        # Heatmap of monthly variations
         st.write("### Mapa de Calor de Variaciones Mensuales")
-        heatmap_data = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month)
+        monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
+        
+        # Define a custom colormap with greens for positive values and reds for negative values
+        cmap = get_custom_cmap()
+        
         fig, ax = plt.subplots(figsize=(12, 8))
-        sns.heatmap(heatmap_data, cmap=get_custom_cmap(), annot=True, fmt='.1f', linewidths=.5, ax=ax)
-        ax.set_title('Mapa de Calor de Variaciones Mensuales')
-        ax.set_xlabel('Mes')
-        ax.set_ylabel('Año')
+        sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
+        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        plt.xlabel("Mes")
+        plt.ylabel("Año")
         st.pyplot(fig)
 
-        # Calculate yearly streaks
-        streaks_by_year = aggregate_streaks_by_year(monthly_data)
+        # Monthly and yearly average/median changes
+        st.write(f"### Cambios {metric_option} Mensuales")
+        if metric_option == "Promedio":
+            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
+        else:
+            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].median()
+        avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
+        ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_xlabel("Mes")
+        ax.set_ylabel(f"{metric_option} de Cambio Mensual (%)")
+        st.pyplot(fig)
+        
+        st.write(f"### Cambios {metric_option} Anuales")
+        if metric_option == "Promedio":
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+        else:
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
+        ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_xlabel("Año")
+        ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
+        st.pyplot(fig)
 
-        # Debugging: Check the columns in the DataFrame
-        st.write("Columnas en el DataFrame de rachas por año:", streaks_by_year.columns)
+        # NEW: Rank months by the number of positive and negative values
+        st.write("### Ranking de Meses por Número de Valores Positivos y Negativos")
+        monthly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x > 0).sum())
+        monthly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x < 0).sum())
+        
+        monthly_rank_df = pd.DataFrame({
+            'Mes': pd.to_datetime(monthly_positive_count.index, format='%m').strftime('%B'),
+            'Positivos': monthly_positive_count.values,
+            'Negativos': monthly_negative_count.values
+        }).sort_values(by='Positivos', ascending=False)
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        monthly_rank_df.set_index('Mes')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
+        ax.set_title("Ranking de Meses por Número de Valores Positivos y Negativos")
+        ax.set_ylabel("Número de Valores")
+        st.pyplot(fig)
 
-        # Ranking by number of streaks
-        if not streaks_by_year.empty:
-            st.write("### Ranking de Años por Número de Rachas Positivas y Negativas")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            try:
-                streaks_by_year[['positive_streaks', 'negative_streaks']].plot(kind='bar', ax=ax)
-                ax.set_title("Ranking de Años por Número de Rachas Positivas y Negativas")
-                ax.set_ylabel("Número de Rachas")
-                st.pyplot(fig)
-            except KeyError as e:
-                st.error(f"Error al generar el gráfico de rachas: {e}")
-
-            # Ranking by longest streaks
-            st.write("### Ranking de Años por las Rachas Más Largas")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            try:
-                streaks_by_year[['longest_positive_streak', 'longest_negative_streak']].plot(kind='bar', ax=ax)
-                ax.set_title("Ranking de Años por las Rachas Más Largas")
-                ax.set_ylabel("Número de Meses")
-                st.pyplot(fig)
-            except KeyError as e:
-                st.error(f"Error al generar el gráfico de rachas largas: {e}")
-
-else:
-    st.error("No se encontraron datos para el análisis.")
+        # NEW: Rank years by the number of positive and negative values
+        st.write("### Ranking de Años por Número de Valores Positivos y Negativos")
+        yearly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x > 0).sum())
+        yearly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x < 0).sum())
+        
+        yearly_rank_df = pd.DataFrame({
+            'Año': yearly_positive_count.index,
+            'Positivos': yearly_positive_count.values,
+            'Negativos': yearly_negative_count.values
+        }).sort_values(by='Positivos', ascending=False)
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        yearly_rank_df.set_index('Año')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
+        ax.set_title("Ranking de Años por Número de Valores Positivos y Negativos")
+        ax.set_ylabel("Número de Valores")
+        st.pyplot(fig)
