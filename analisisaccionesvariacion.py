@@ -131,7 +131,7 @@ def aggregate_streaks_by_year(data):
             'longest_negative_streak': max(streaks['negative'], default=0)
         }
     
-    return pd.DataFrame(yearly_streaks).sort_index()
+    return pd.DataFrame.from_dict(yearly_streaks, orient='index').sort_index()
 
 # Streamlit app
 st.title("Análisis de Precios de Acciones - MTaurus - X: https://x.com/MTaurus_ok")
@@ -196,13 +196,12 @@ if data:
         
         # Percentiles with different colors and vertical labels
         percentiles = [5, 25, 50, 75, 95]
-        colors = ['red', 'orange', 'green', 'blue', 'purple']
-        for i, percentile in enumerate(percentiles):
-            perc_value = np.percentile(monthly_changes, percentile)
-            ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
-            ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
-                    rotation=90, verticalalignment='center')
-
+        colors = ['red', 'orange', 'green', 'orange', 'red']
+        for perc, color in zip(percentiles, colors):
+            value = np.percentile(monthly_changes, perc)
+            ax.axvline(value, color=color, linestyle='dashed')
+            ax.text(value, 0.02, f'{perc}th Pct', color=color, rotation=90, verticalalignment='center')
+        
         ax.set_title('Histograma con Ajuste de Gauss')
         ax.set_xlabel('Cambio Mensual (%)')
         ax.set_ylabel('Densidad')
@@ -222,18 +221,31 @@ if data:
         # Calculate yearly streaks
         streaks_by_year = aggregate_streaks_by_year(monthly_data)
 
-        # Ranking by number of streaks
-        st.write("### Ranking de Años por Número de Rachas Positivas y Negativas")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        streaks_by_year[['positive_streaks', 'negative_streaks']].plot(kind='bar', ax=ax)
-        ax.set_title("Ranking de Años por Número de Rachas Positivas y Negativas")
-        ax.set_ylabel("Número de Rachas")
-        st.pyplot(fig)
+        # Debugging: Check the columns in the DataFrame
+        st.write("Columnas en el DataFrame de rachas por año:", streaks_by_year.columns)
 
-        # Ranking by longest streaks
-        st.write("### Ranking de Años por las Rachas Más Largas")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        streaks_by_year[['longest_positive_streak', 'longest_negative_streak']].plot(kind='bar', ax=ax)
-        ax.set_title("Ranking de Años por las Rachas Más Largas")
-        ax.set_ylabel("Número de Meses")
-        st.pyplot(fig)
+        # Ranking by number of streaks
+        if not streaks_by_year.empty:
+            st.write("### Ranking de Años por Número de Rachas Positivas y Negativas")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            try:
+                streaks_by_year[['positive_streaks', 'negative_streaks']].plot(kind='bar', ax=ax)
+                ax.set_title("Ranking de Años por Número de Rachas Positivas y Negativas")
+                ax.set_ylabel("Número de Rachas")
+                st.pyplot(fig)
+            except KeyError as e:
+                st.error(f"Error al generar el gráfico de rachas: {e}")
+
+            # Ranking by longest streaks
+            st.write("### Ranking de Años por las Rachas Más Largas")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            try:
+                streaks_by_year[['longest_positive_streak', 'longest_negative_streak']].plot(kind='bar', ax=ax)
+                ax.set_title("Ranking de Años por las Rachas Más Largas")
+                ax.set_ylabel("Número de Meses")
+                st.pyplot(fig)
+            except KeyError as e:
+                st.error(f"Error al generar el gráfico de rachas largas: {e}")
+
+else:
+    st.error("No se encontraron datos para el análisis.")
