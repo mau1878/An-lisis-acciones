@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import norm
@@ -137,30 +138,31 @@ if data:
         st.write("### Histograma de Variaciones Mensuales con Ajuste de Gauss")
         monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.histplot(monthly_changes, kde=False, stat="density", color="skyblue", ax=ax, binwidth=2)
-        
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(x=monthly_changes, histnorm='probability density', name='Histograma', marker_color='skyblue'))
+
         # Fit Gaussian distribution
         mu, std = norm.fit(monthly_changes)
-        xmin, xmax = ax.get_xlim()
-        x = np.linspace(xmin, xmax, 100)
+        x = np.linspace(monthly_changes.min(), monthly_changes.max(), 100)
         p = norm.pdf(x, mu, std)
-        ax.plot(x, p, 'k', linewidth=2)
-        
+        fig.add_trace(go.Scatter(x=x, y=p, mode='lines', name='Distribución Normal', line=dict(color='black')))
+
         # Percentiles with different colors and vertical labels
         percentiles = [5, 25, 50, 75, 95]
         colors = ['red', 'orange', 'green', 'blue', 'purple']
         for i, percentile in enumerate(percentiles):
             perc_value = np.percentile(monthly_changes, percentile)
-            ax.axvline(perc_value, color=colors[i], linestyle='--', label=f'{percentile}º Percentil')
-            ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
-                    rotation=90, verticalalignment='center', horizontalalignment='right')
+            fig.add_trace(go.Scatter(x=[perc_value], y=[0.1], mode='markers+text',
+                                     text=[f'{percentile}º Percentil: {perc_value:.2f}'],
+                                     textposition='top right',
+                                     marker=dict(color=colors[i], size=10),
+                                     name=f'{percentile}º Percentil'))
 
-        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
-        ax.set_xlabel("Cambio Mensual (%)")
-        ax.set_ylabel("Densidad")
-        ax.legend()
-        st.pyplot(fig)
+        fig.update_layout(title="Histograma de Cambios Mensuales con Ajuste de Gauss",
+                          xaxis_title="Cambio Mensual (%)",
+                          yaxis_title="Densidad",
+                          legend_title="Percentiles")
+        st.plotly_chart(fig)
 
         # Heatmap of monthly variations
         st.write("### Mapa de Calor de Variaciones Mensuales")
@@ -169,12 +171,15 @@ if data:
         # Define a custom colormap with greens for positive values and reds for negative values
         cmap = get_custom_cmap()
         
-        fig, ax = plt.subplots(figsize=(12, 8))
-        sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
-        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-        plt.xlabel("Mes")
-        plt.ylabel("Año")
-        st.pyplot(fig)
+        fig = go.Figure(data=go.Heatmap(z=monthly_pivot.values,
+                                       x=monthly_pivot.columns,
+                                       y=monthly_pivot.index,
+                                       colorscale=cmap.colors,
+                                       colorbar=dict(title='Cambio Mensual (%)')))
+        fig.update_layout(title=f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""),
+                          xaxis_title="Mes",
+                          yaxis_title="Año")
+        st.plotly_chart(fig)
 
         # Monthly and yearly average/median changes
         st.write(f"### Cambios {metric_option} Mensuales")
@@ -184,56 +189,9 @@ if data:
             avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].median()
         avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
         
-        fig, ax = plt.subplots(figsize=(10, 6))
-        avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-        ax.set_xlabel("Mes")
-        ax.set_ylabel(f"{metric_option} de Cambio Mensual (%)")
-        st.pyplot(fig)
-        
-        st.write(f"### Cambios {metric_option} Anuales")
-        if metric_option == "Promedio":
-            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
-        else:
-            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
-        ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
-        ax.set_xlabel("Año")
-        ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
-        st.pyplot(fig)
-
-        # NEW: Rank months by the number of positive and negative values
-        st.write("### Ranking de Meses por Número de Valores Positivos y Negativos")
-        monthly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x > 0).sum())
-        monthly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x < 0).sum())
-        
-        monthly_rank_df = pd.DataFrame({
-            'Mes': pd.to_datetime(monthly_positive_count.index, format='%m').strftime('%B'),
-            'Positivos': monthly_positive_count.values,
-            'Negativos': monthly_negative_count.values
-        }).sort_values(by='Positivos', ascending=False)
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        monthly_rank_df.set_index('Mes')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
-        ax.set_title("Ranking de Meses por Número de Valores Positivos y Negativos")
-        ax.set_ylabel("Número de Valores")
-        st.pyplot(fig)
-
-        # NEW: Rank years by the number of positive and negative values
-        st.write("### Ranking de Años por Número de Valores Positivos y Negativos")
-        yearly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x > 0).sum())
-        yearly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x < 0).sum())
-        
-        yearly_rank_df = pd.DataFrame({
-            'Año': yearly_positive_count.index,
-            'Positivos': yearly_positive_count.values,
-            'Negativos': yearly_negative_count.values
-        }).sort_values(by='Positivos', ascending=False)
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        yearly_rank_df.set_index('Año')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
-        ax.set_title("Ranking de Años por Número de Valores Positivos y Negativos")
-        ax.set_ylabel("Número de Valores")
-        st.pyplot(fig)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=avg_monthly_changes.index, y=avg_monthly_changes.values, marker_color='skyblue'))
+        fig.update_layout(title=f"Cambios {metric_option} Mensuales de {main_ticker}",
+                          xaxis_title="Mes",
+                          yaxis_title="Cambio Mensual (%)")
+        st.plotly_chart(fig)
