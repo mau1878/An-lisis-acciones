@@ -91,7 +91,7 @@ def find_streaks(changes):
     streaks = []
     current_streak = {'type': None, 'length': 0, 'start_date': None, 'end_date': None}
 
-    for date, change in changes.iteritems():
+    for date, change in changes.items():  # Changed from iteritems() to items()
         if pd.isna(change):
             continue
         
