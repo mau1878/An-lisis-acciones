@@ -86,34 +86,6 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ypfd_ra
 
     return result
 
-# Function to find streaks
-def find_streaks(changes):
-    streaks = []
-    current_streak = {'type': None, 'length': 0, 'start_date': None, 'end_date': None}
-
-    for date, change in changes.items():  # Changed from iteritems() to items()
-        if pd.isna(change):
-            continue
-        
-        current_type = 'positive' if change > 0 else 'negative'
-        
-        if current_streak['type'] is None:
-            current_streak['type'] = current_type
-            current_streak['start_date'] = date
-            current_streak['end_date'] = date
-            current_streak['length'] = 1
-        elif current_streak['type'] == current_type:
-            current_streak['length'] += 1
-            current_streak['end_date'] = date
-        else:
-            streaks.append(current_streak)
-            current_streak = {'type': current_type, 'length': 1, 'start_date': date, 'end_date': date}
-    
-    if current_streak['type'] is not None:
-        streaks.append(current_streak)
-
-    return sorted(streaks, key=lambda x: x['length'], reverse=True)
-
 # Streamlit app
 st.title("Análisis de Precios de Acciones - MTaurus - X: https://x.com/MTaurus_ok")
 
@@ -192,15 +164,47 @@ if data:
 
         # Heatmap of monthly variations
         st.write("### Mapa de Calor de Variaciones Mensuales")
-        heatmap_data = monthly_data.pivot_table(index=monthly_data.index.month, columns=monthly_data.index.year, values='Cambio Mensual (%)')
-        fig = plt.figure(figsize=(12, 8))
-        sns.heatmap(heatmap_data, cmap=get_custom_cmap(), annot=True, fmt='.1f', linewidths=.5, linecolor='black')
-        plt.title("Mapa de Calor de Variaciones Mensuales")
-        plt.xlabel("Año")
-        plt.ylabel("Mes")
+        monthly_pivot = monthly_data.pivot_table(values='Cambio Mensual (%)', index=monthly_data.index.year, columns=monthly_data.index.month, aggfunc='mean')
+        
+        # Define a custom colormap with greens for positive values and reds for negative values
+        cmap = get_custom_cmap()
+        
+        fig, ax = plt.subplots(figsize=(12, 8))
+        sns.heatmap(monthly_pivot, cmap=cmap, annot=True, fmt=".2f", linewidths=0.5, center=0, ax=ax)
+        plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        plt.xlabel("Mes")
+        plt.ylabel("Año")
         st.pyplot(fig)
 
-        # Rank months by number of positive and negative values
+        # Monthly and yearly average/median changes
+        st.write(f"### Cambios {metric_option} Mensuales")
+        if metric_option == "Promedio":
+            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
+        else:
+            avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].median()
+        avg_monthly_changes.index = pd.to_datetime(avg_monthly_changes.index, format='%m').strftime('%B')
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        avg_monthly_changes.plot(kind='bar', color='skyblue', ax=ax)
+        ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_xlabel("Mes")
+        ax.set_ylabel(f"{metric_option} de Cambio Mensual (%)")
+        st.pyplot(fig)
+        
+        st.write(f"### Cambios {metric_option} Anuales")
+        if metric_option == "Promedio":
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+        else:
+            avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        avg_yearly_changes.plot(kind='bar', color='skyblue', ax=ax)
+        ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
+        ax.set_xlabel("Año")
+        ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
+        st.pyplot(fig)
+
+        # NEW: Rank months by the number of positive and negative values
         st.write("### Ranking de Meses por Número de Valores Positivos y Negativos")
         monthly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x > 0).sum())
         monthly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.month).apply(lambda x: (x < 0).sum())
@@ -217,7 +221,7 @@ if data:
         ax.set_ylabel("Número de Valores")
         st.pyplot(fig)
 
-        # Rank years by number of positive and negative values
+        # NEW: Rank years by the number of positive and negative values
         st.write("### Ranking de Años por Número de Valores Positivos y Negativos")
         yearly_positive_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x > 0).sum())
         yearly_negative_count = monthly_data['Cambio Mensual (%)'].groupby(monthly_data.index.year).apply(lambda x: (x < 0).sum())
@@ -233,27 +237,95 @@ if data:
         ax.set_title("Ranking de Años por Número de Valores Positivos y Negativos")
         ax.set_ylabel("Número de Valores")
         st.pyplot(fig)
+        # ... (existing code remains unchanged)
 
-        # Calculate the longest streaks
-        streaks = find_streaks(monthly_data['Cambio Mensual (%)'])
+        # NEW: Ranking of Longest Positive and Negative Streaks
+        def find_longest_streaks(series):
+            # Find streaks of consecutive values above or below 0
+            streaks = {'Positive': [], 'Negative': []}
+            current_streak = {'Positive': 0, 'Negative': 0}
+            current_streak_start = {'Positive': None, 'Negative': None}
+            
+            for date, value in series.iteritems():
+                if value > 0:
+                    if current_streak['Negative'] > 0:
+                        streaks['Negative'].append({
+                            'Start Date': current_streak_start['Negative'],
+                            'End Date': date - pd.DateOffset(1),
+                            'Length': current_streak['Negative']
+                        })
+                        current_streak['Negative'] = 0
+                        current_streak_start['Negative'] = None
+                    
+                    if current_streak['Positive'] == 0:
+                        current_streak_start['Positive'] = date
+                    current_streak['Positive'] += 1
+                elif value < 0:
+                    if current_streak['Positive'] > 0:
+                        streaks['Positive'].append({
+                            'Start Date': current_streak_start['Positive'],
+                            'End Date': date - pd.DateOffset(1),
+                            'Length': current_streak['Positive']
+                        })
+                        current_streak['Positive'] = 0
+                        current_streak_start['Positive'] = None
+                    
+                    if current_streak['Negative'] == 0:
+                        current_streak_start['Negative'] = date
+                    current_streak['Negative'] += 1
+                else:
+                    if current_streak['Positive'] > 0:
+                        streaks['Positive'].append({
+                            'Start Date': current_streak_start['Positive'],
+                            'End Date': date - pd.DateOffset(1),
+                            'Length': current_streak['Positive']
+                        })
+                        current_streak['Positive'] = 0
+                        current_streak_start['Positive'] = None
+                    
+                    if current_streak['Negative'] > 0:
+                        streaks['Negative'].append({
+                            'Start Date': current_streak_start['Negative'],
+                            'End Date': date - pd.DateOffset(1),
+                            'Length': current_streak['Negative']
+                        })
+                        current_streak['Negative'] = 0
+                        current_streak_start['Negative'] = None
+            
+            # Account for streaks that end at the last date
+            if current_streak['Positive'] > 0:
+                streaks['Positive'].append({
+                    'Start Date': current_streak_start['Positive'],
+                    'End Date': date,
+                    'Length': current_streak['Positive']
+                })
+            if current_streak['Negative'] > 0:
+                streaks['Negative'].append({
+                    'Start Date': current_streak_start['Negative'],
+                    'End Date': date,
+                    'Length': current_streak['Negative']
+                })
+            
+            return streaks
         
+        streaks = find_longest_streaks(monthly_data['Cambio Mensual (%)'])
+        
+        # Convert streaks to DataFrame and display
+        st.write("### Ranking de Rachas Positivas y Negativas")
         if streaks:
-            # Create a DataFrame for streaks
-            streaks_df = pd.DataFrame(streaks)
-            streaks_df['Streak Type'] = streaks_df['type'].str.capitalize()
-            streaks_df['Length'] = streaks_df['length']
-            streaks_df['Start Date'] = streaks_df['start_date']
-            streaks_df['End Date'] = streaks_df['end_date']
-            streaks_df.sort_values(by='Length', ascending=False, inplace=True)
-
-            # Display rankings
-            st.write("### Ranking de las Series Más Largas")
-            fig = px.bar(streaks_df, x='Length', y='Streak Type', color='Streak Type', text='Length',
-                         title="Ranking de las Series de Cambios Mensuales Más Largas",
-                         labels={'Length': 'Longitud de la Serie', 'Streak Type': 'Tipo de Serie'})
-            fig.update_layout(yaxis_title='', xaxis_title='Longitud de la Serie')
-            st.plotly_chart(fig)
-        else:
-            st.write("No se encontraron series de cambios mensuales.")
-else:
-    st.warning("No se encontraron datos para los tickers seleccionados.")
+            # Process Positive Streaks
+            positive_streaks_df = pd.DataFrame(streaks['Positive'])
+            positive_streaks_df = positive_streaks_df.sort_values(by='Length', ascending=False)
+            positive_streaks_df.reset_index(drop=True, inplace=True)
+            
+            # Process Negative Streaks
+            negative_streaks_df = pd.DataFrame(streaks['Negative'])
+            negative_streaks_df = negative_streaks_df.sort_values(by='Length', ascending=False)
+            negative_streaks_df.reset_index(drop=True, inplace=True)
+            
+            # Display tables
+            st.write("#### Ranking de Rachas Positivas")
+            st.dataframe(positive_streaks_df, use_container_width=True)
+            
+            st.write("#### Ranking de Rachas Negativas")
+            st.dataframe(negative_streaks_df, use_container_width=True)
