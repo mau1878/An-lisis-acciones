@@ -274,12 +274,14 @@ if data:
                 for streak in streaks:
                     streak['start'] = data.index[streak['start']]
                     streak['end'] = data.index[streak['end']]
+                    # Calculate the duration in months
+                    streak['length'] = (streak['end'].year - streak['start'].year) * 12 + (streak['end'].month - streak['start'].month) + 1
             
             return streaks
         
         # Apply the function to your data
         # Calculate streaks from the monthly data
-        streaks = calculate_streaks(monthly_data['Cambio Mensual (%)'].dropna().values)
+        streaks = calculate_streaks(monthly_data['Cambio Mensual (%)'].dropna())
         
         # Ensure the streaks list is correctly structured
         streaks_data = []
@@ -288,8 +290,8 @@ if data:
             streak_type = 'positive' if streak['value'] > 0 else 'negative'
             streaks_data.append({
                 'type': streak_type,
-                'start': streak['start'],
-                'end': streak['end'],
+                'start': streak['start'].strftime('%Y-%m'),  # Format to Year-Month
+                'end': streak['end'].strftime('%Y-%m'),      # Format to Year-Month
                 'length': streak['length']
             })
         
@@ -316,5 +318,3 @@ if data:
         
         st.write("#### Rachas Negativas más Largas")
         st.dataframe(top_negative_streaks[['start', 'end', 'length']].rename(columns={'start': 'Inicio', 'end': 'Fin', 'length': 'Duración (meses)'}))
-        
-        
