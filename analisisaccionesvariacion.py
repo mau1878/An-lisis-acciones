@@ -176,6 +176,8 @@ if data:
         plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         plt.xlabel("Mes")
         plt.ylabel("Año")
+        # Add watermark   
+        plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey', ha='center', va='center', alpha=0.5, transform=ax.transAxes)
         st.pyplot(fig)
 
         # Monthly and yearly average/median changes
@@ -191,6 +193,8 @@ if data:
         ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         ax.set_xlabel("Mes")
         ax.set_ylabel(f"{metric_option} de Cambio Mensual (%)")
+        # Add watermark   
+        plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey', ha='center', va='center', alpha=0.5, transform=ax.transAxes)
         st.pyplot(fig)
         
         st.write(f"### Cambios {metric_option} Anuales")
@@ -204,6 +208,8 @@ if data:
         ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         ax.set_xlabel("Año")
         ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
+        # Add watermark   
+        plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey', ha='center', va='center', alpha=0.5, transform=ax.transAxes)
         st.pyplot(fig)
 
         # NEW: Rank months by the number of positive and negative values
@@ -221,6 +227,8 @@ if data:
         monthly_rank_df.set_index('Mes')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
         ax.set_title("Ranking de Meses por Número de Valores Positivos y Negativos")
         ax.set_ylabel("Número de Valores")
+        # Add watermark   
+        plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey', ha='center', va='center', alpha=0.5, transform=ax.transAxes)
         st.pyplot(fig)
 
         # NEW: Rank years by the number of positive and negative values
@@ -238,6 +246,8 @@ if data:
         yearly_rank_df.set_index('Año')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
         ax.set_title("Ranking de Años por Número de Valores Positivos y Negativos")
         ax.set_ylabel("Número de Valores")
+        # Add watermark   
+        plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey', ha='center', va='center', alpha=0.5, transform=ax.transAxes)
         st.pyplot(fig)
        
         # Existing functions and code
