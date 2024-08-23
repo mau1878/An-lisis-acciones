@@ -156,7 +156,7 @@ if data:
             ax.text(perc_value, ax.get_ylim()[1]*0.9, f'{perc_value:.2f}', color=colors[i],
                     rotation=90, verticalalignment='center', horizontalalignment='right')
 
-        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss")
+        ax.set_title(f"Histograma de Cambios Mensuales con Ajuste de Gauss para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         ax.set_xlabel("Cambio Mensual (%)")
         ax.set_ylabel("Densidad")
         ax.legend()
