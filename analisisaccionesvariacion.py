@@ -225,7 +225,7 @@ if data:
         
         fig, ax = plt.subplots(figsize=(10, 6))
         monthly_rank_df.set_index('Mes')[['Positivos', 'Negativos']].plot(kind='bar', ax=ax)
-        ax.set_title("Ranking de Meses por Número de Valores Positivos y Negativos")
+        ax.set_title(f"Ranking de Meses por Número de Valores Positivos y Negativos para {main_ticker}" + (f" / {second_ticker}" if second_ticker else "") + (f" / {third_ticker}" if third_ticker else ""))
         ax.set_ylabel("Número de Valores")
         # Add watermark   
         plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey', ha='center', va='center', alpha=0.5, transform=ax.transAxes)
