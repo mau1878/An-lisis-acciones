@@ -160,6 +160,8 @@ if data:
         ax.set_xlabel("Cambio Mensual (%)")
         ax.set_ylabel("Densidad")
         ax.legend()
+        # Add watermark   
+        plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey', ha='center', va='center', alpha=0.5, transform=ax.transAxes)
         st.pyplot(fig)
 
         # Heatmap of monthly variations
