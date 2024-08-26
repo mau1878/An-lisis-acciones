@@ -97,7 +97,7 @@ main_ticker = st.text_input("Ingrese el ticker principal (por ejemplo GGAL.BA o 
 second_ticker = st.text_input("Ingrese el segundo ticker o ratio divisor (opcional):")
 third_ticker = st.text_input("Ingrese el tercer ticker o ratio divisor (opcional):")
 
-start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('2000-01-01'))
+start_date = st.date_input("Seleccione la fecha de inicio:", value=pd.to_datetime('2010-01-01'), min_value=pd.to_datetime('1990-01-01'))
 end_date = st.date_input("Seleccione la fecha de fin:", value=pd.to_datetime('today'))
 
 # Option to choose between average and median for monthly and yearly graphs
