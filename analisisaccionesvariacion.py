@@ -122,9 +122,9 @@ if data:
         if isinstance(ratio_data, pd.Series):
             ratio_data = ratio_data.to_frame(name='Adjusted Close')
         ratio_data.index = pd.to_datetime(ratio_data.index)
-        ratio_data['Month'] = ratio_data.index.to_period('M')
-        monthly_data = ratio_data.resample('M').ffill()
-        monthly_data['Cambio Mensual (%)'] = monthly_data['Adjusted Close'].pct_change() * 100
+        ratio_data.loc[:, 'Month'] = ratio_data.index.to_period('M')
+        monthly_data = ratio_data.resample('ME').ffill()
+        monthly_data['Cambio Mensual (%)'] = monthly_data['Adj Close'].pct_change() * 100
 
         # Plot monthly price variations
         st.write("### Variaciones Mensuales de Precios")
