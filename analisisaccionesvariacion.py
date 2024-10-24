@@ -119,7 +119,8 @@ if data:
     
     if ratio_data is not None:
         # Calculate monthly price variations
-        ratio_data = ratio_data.to_frame(name='Adjusted Close')
+        if isinstance(ratio_data, pd.Series):
+            ratio_data = ratio_data.to_frame(name='Adjusted Close')
         ratio_data.index = pd.to_datetime(ratio_data.index)
         ratio_data['Month'] = ratio_data.index.to_period('M')
         monthly_data = ratio_data.resample('M').ffill()
