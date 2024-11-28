@@ -620,6 +620,84 @@ def create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, thi
            ha='center', va='center', alpha=0.5, transform=ax.transAxes)
   st.pyplot(fig)
 
+def create_average_changes_visualization(monthly_data, metric_option, main_ticker, second_ticker, third_ticker):
+  # Monthly Changes
+  st.write(f"### 📈 Cambios {metric_option} Mensuales")
+
+  # Calculate monthly changes based on selected metric
+  if metric_option == "Promedio":
+      avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].mean()
+  else:
+      avg_monthly_changes = monthly_data.groupby(monthly_data.index.month)['Cambio Mensual (%)'].median()
+
+  # Convert month numbers to Spanish month names
+  month_names = {
+      1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
+      5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
+      9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+  }
+  avg_monthly_changes.index = [month_names[i] for i in avg_monthly_changes.index]
+
+  # Create monthly plot
+  fig, ax = plt.subplots(figsize=(12, 6))
+  bars = ax.bar(range(len(avg_monthly_changes)), avg_monthly_changes)
+
+  # Color bars based on values
+  for bar in bars:
+      if bar.get_height() >= 0:
+          bar.set_color('green')
+      else:
+          bar.set_color('red')
+
+  ax.set_title(f"Cambios {metric_option} Mensuales para {main_ticker}" +
+               (f" / {second_ticker}" if second_ticker else "") +
+               (f" / {third_ticker}" if third_ticker else ""))
+  ax.set_xlabel("Mes")
+  ax.set_ylabel(f"{metric_option} de Cambio Mensual (%)")
+  plt.xticks(range(len(avg_monthly_changes)), avg_monthly_changes.index, rotation=45)
+
+  # Add watermark
+  plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey',
+           ha='center', va='center', alpha=0.5, transform=ax.transAxes)
+  plt.tight_layout()
+  st.pyplot(fig)
+
+  # Yearly Changes
+  st.write(f"### 📈 Cambios {metric_option} Anuales")
+
+  # Calculate yearly changes based on selected metric
+  if metric_option == "Promedio":
+      avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+  else:
+      avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
+
+  # Sort years chronologically
+  avg_yearly_changes = avg_yearly_changes.sort_index()
+
+  # Create yearly plot
+  fig, ax = plt.subplots(figsize=(14, 6))
+  bars = ax.bar(range(len(avg_yearly_changes)), avg_yearly_changes)
+
+  # Color bars based on values
+  for bar in bars:
+      if bar.get_height() >= 0:
+          bar.set_color('green')
+      else:
+          bar.set_color('red')
+
+  ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" +
+               (f" / {second_ticker}" if second_ticker else "") +
+               (f" / {third_ticker}" if third_ticker else ""))
+  ax.set_xlabel("Año")
+  ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
+  plt.xticks(range(len(avg_yearly_changes)), avg_yearly_changes.index, rotation=45)
+
+  # Add watermark
+  plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey',
+           ha='center', va='center', alpha=0.5, transform=ax.transAxes)
+  plt.tight_layout()
+  st.pyplot(fig)
+
 def create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker):
   st.write("### 🔥 Mapa de Calor de Variaciones Mensuales")
   monthly_pivot = monthly_data.pivot_table(
@@ -701,7 +779,7 @@ def create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker
   # 3. Monthly Heatmap
   create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker)
 
-
+  create_average_changes_visualization(monthly_data, metric_option, main_ticker, second_ticker, third_ticker)
 
   # 5. Rankings
   create_monthly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
