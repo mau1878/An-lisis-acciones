@@ -697,7 +697,6 @@ def create_average_changes_visualization(monthly_data, metric_option, main_ticke
              ha='center', va='center', alpha=0.5, transform=ax.transAxes)
     plt.tight_layout()
     st.pyplot(fig)
-
   # Yearly Changes
   st.write(f"### 📈 Cambios {metric_option} Anuales")
 
