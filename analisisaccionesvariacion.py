@@ -737,6 +737,7 @@ def create_average_changes_visualization(monthly_data, metric_option, main_ticke
   st.write(f"### 📈 Cambios {metric_option} Anuales")
 
   # Calculate yearly changes based on selected metric
+
   if metric_option == "Promedio":
       avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
   else:
