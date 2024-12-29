@@ -14,6 +14,7 @@ import urllib3
 
 # Configure logging
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.ERROR)
 
 # Configuración de la página de Streamlit
 st.set_page_config(
@@ -439,8 +440,8 @@ def create_monthly_ranking(monthly_data, main_ticker, second_ticker, third_ticke
 
     # Customize the plot
     ax.set_title(f"Ranking de Meses por Número de Variaciones Intermensuales Positivas y Negativas para {main_ticker}" +
-                 (f" / {second_ticker}" if second_ticker else "") +
-                 (f" / {third_ticker}" if third_ticker else ""))
+                (f" / {second_ticker}" if second_ticker else "") +
+                (f" / {third_ticker}" if third_ticker else ""))
     ax.set_ylabel("Número de Valores")
     ax.set_xticks(x)
     ax.set_xticklabels(monthly_rank_df['Mes'], rotation=45)
@@ -479,8 +480,8 @@ def create_yearly_ranking(monthly_data, main_ticker, second_ticker, third_ticker
 
     # Customize the plot
     ax.set_title(f"Ranking de Años por Número de Variaciones Intermensuales Positivas y Negativas para {main_ticker}" +
-                 (f" / {second_ticker}" if second_ticker else "") +
-                 (f" / {third_ticker}" if third_ticker else ""))
+                (f" / {second_ticker}" if second_ticker else "") +
+                (f" / {third_ticker}" if third_ticker else ""))
     ax.set_ylabel("Número de Valores")
     ax.set_xticks(x)
     ax.set_xticklabels(yearly_rank_df['Año'], rotation=45)
@@ -527,6 +528,51 @@ def create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, thi
     plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey',
              ha='center', va='center', alpha=0.5, transform=ax.transAxes)
     st.pyplot(fig)
+
+def create_heatmap(monthly_data, main_ticker, second_ticker, third_ticker):
+    st.write("### 🔥 Heatmap de Cambios Mensuales por Año")
+
+    # Create a copy to avoid SettingWithCopyWarning
+    heatmap_data = monthly_data.copy()
+    heatmap_data['Año'] = heatmap_data.index.year
+    heatmap_data['Mes'] = heatmap_data.index.strftime('%b')  # Short month name in Spanish
+    # Ensure month names are in order
+    heatmap_data['Mes_Num'] = monthly_data.index.month
+    month_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    # Map to Spanish month abbreviations
+    spanish_months = {
+        'Jan': 'Ene', 'Feb': 'Feb', 'Mar': 'Mar', 'Apr': 'Abr',
+        'May': 'May', 'Jun': 'Jun', 'Jul': 'Jul', 'Aug': 'Ago',
+        'Sep': 'Sep', 'Oct': 'Oct', 'Nov': 'Nov', 'Dec': 'Dic'
+    }
+    heatmap_data['Mes'] = heatmap_data['Mes'].map(spanish_months)
+
+    # Pivot the data
+    pivot_table = heatmap_data.pivot_table(
+        index='Año',
+        columns='Mes',
+        values='Cambio Mensual (%)',
+        aggfunc='mean'
+    )
+
+    # Reorder the columns to match month_order
+    pivot_table = pivot_table[sorted(pivot_table.columns, key=lambda x: list(spanish_months.values()).index(x))]
+
+    # Plot heatmap using seaborn
+    plt.figure(figsize=(14, 10))
+    sns.heatmap(pivot_table, annot=True, fmt=".2f", cmap='coolwarm', linewidths=.5, linecolor='gray')
+    plt.title(f"Heatmap de Cambios Mensuales Promedio por Año para {main_ticker}" +
+              (f" / {second_ticker}" if second_ticker else "") +
+              (f" / {third_ticker}" if third_ticker else ""))
+    plt.xlabel("Mes")
+    plt.ylabel("Año")
+    plt.tight_layout()
+    # Add watermark
+    plt.text(0.5, -0.1, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey',
+             ha='center', va='center', alpha=0.5, transform=plt.gca().transAxes)
+    st.pyplot(plt)
+    plt.close()
 
 def create_average_changes_visualization(monthly_data, metric_option, main_ticker, second_ticker, third_ticker):
     # Monthly Changes
@@ -609,8 +655,12 @@ def create_average_changes_visualization(monthly_data, metric_option, main_ticke
 def create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option):
     create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, third_ticker)
     create_average_changes_visualization(monthly_data, metric_option, main_ticker, second_ticker, third_ticker)
+    create_heatmap(monthly_data, main_ticker, second_ticker, third_ticker)
     create_monthly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
     create_yearly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
+
+# Visualization Functions (Repeated for clarity)
+# Already defined: create_histogram_with_gaussian, create_heatmap, create_average_changes_visualization
 
 # Main UI Layout
 def main():
@@ -673,39 +723,42 @@ def main():
         tickers.update(set(ccl_pair))
 
     # Validate and process data
-    if all(validate_ticker_format(ticker, data_source) for ticker in tickers if ticker):
-        data = fetch_data(tickers, start_date, end_date, data_source)
+    if main_ticker:  # Ensure main ticker is provided
+        if all(validate_ticker_format(ticker, data_source) for ticker in tickers if ticker):
+            data = fetch_data(tickers, start_date, end_date, data_source)
 
-        if data:
-            # Align dates and fill missing values
-            data = align_dates(data)
+            if data:
+                # Align dates and fill missing values
+                data = align_dates(data)
 
-            # Evaluate ratio based on selected tickers
-            ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_ratio, data_source)
+                # Evaluate ratio based on selected tickers
+                ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_ratio, data_source)
 
-            if ratio_data is not None:
-                # Convert to DataFrame if it's a Series
-                if isinstance(ratio_data, pd.Series):
-                    ratio_data = ratio_data.to_frame(name='Adj Close')
+                if ratio_data is not None:
+                    # Convert to DataFrame if it's a Series
+                    if isinstance(ratio_data, pd.Series):
+                        ratio_data = ratio_data.to_frame(name='Adj Close')
 
-                ratio_data.index = pd.to_datetime(ratio_data.index)
+                    ratio_data.index = pd.to_datetime(ratio_data.index)
 
-                # Create a copy of DataFrame to avoid SettingWithCopyWarning
-                ratio_data = ratio_data.copy()
-                ratio_data['Month'] = ratio_data.index.to_period('M')
+                    # Create a copy of DataFrame to avoid SettingWithCopyWarning
+                    ratio_data = ratio_data.copy()
+                    ratio_data['Month'] = ratio_data.index.to_period('M')
 
-                # Resample to monthly and forward fill
-                monthly_data = ratio_data.resample('M').ffill()
+                    # Resample to monthly and forward fill
+                    monthly_data = ratio_data.resample('M').ffill()
 
-                # Verify if 'Adj Close' is present after resampling
-                if 'Adj Close' not in monthly_data.columns:
-                    st.error("'Adj Close' no está disponible en los datos después del resampleo.")
-                else:
-                    # Calculate monthly percentage change
-                    monthly_data['Cambio Mensual (%)'] = monthly_data['Adj Close'].pct_change() * 100
+                    # Verify if 'Adj Close' is present after resampling
+                    if 'Adj Close' not in monthly_data.columns:
+                        st.error("'Adj Close' no está disponible en los datos después del resampleo.")
+                    else:
+                        # Calculate monthly percentage change
+                        monthly_data['Cambio Mensual (%)'] = monthly_data['Adj Close'].pct_change() * 100
 
-                    # Visualizations
-                    create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option)
+                        # Visualizations
+                        create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option)
+    else:
+        st.warning("Por favor, ingrese el ticker principal para comenzar el análisis.")
 
 # Execute main function
 if __name__ == "__main__":
