@@ -739,4 +739,40 @@ def create_average_changes_visualization(monthly_data, metric_option, main_ticke
 
   # Calculate yearly changes based on selected metric
   if metric_option == "Promedio":
+      avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].mean()
+  else:
+      avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].median()
+
+  # Sort years chronologically
+  avg_yearly_changes = avg_yearly_changes.sort_index()
+
+  # Create yearly plot
+  fig, ax = plt.subplots(figsize=(14, 6))
+  bars = ax.bar(range(len(avg_yearly_changes)), avg_yearly_changes)
+
+  # Color bars based on values
+  for bar in bars:
+      if bar.get_height() >= 0:
+          bar.set_color('green')
+      else:
+          bar.set_color('red')
+
+  ax.set_title(f"Cambios {metric_option} Anuales para {main_ticker}" +
+               (f" / {second_ticker}" if second_ticker else "") +
+               (f" / {third_ticker}" if third_ticker else ""))
+  ax.set_xlabel("Año")
+  ax.set_ylabel(f"{metric_option} de Cambio Anual (%)")
+  plt.xticks(range(len(avg_yearly_changes)), avg_yearly_changes.index, rotation=45)
+
+  # Add watermark
+  plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey',
+           ha='center', va='center', alpha=0.5, transform=ax.transAxes)
+  plt.tight_layout()
+  st.pyplot(fig)
+
+  # Yearly Changes
+  st.write(f"### 📈 Cambios {metric_option} Anuales")
+
+  # Calculate yearly changes based on selected metric
+  if metric_option == "Promedio":
       avg_yearly_changes = monthly_data.groupby(monthly_data.index.year)['Cambio Mensual (%)'].
