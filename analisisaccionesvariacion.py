@@ -388,22 +388,22 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
                 st.error("No hay datos disponibles para **YPFD.BA** o **YPF**.")
                 return None
         else:
-            st.write(f"Aplicando la razón AL30/AL30C al ticker **{main_ticker}**...")
-            ccl_tickers = ['AL30', 'AL30C']
+            st.write(f"Aplicando la razón GD30/GD30C al ticker **{main_ticker}**...")
+            ccl_tickers = ['GD30', 'GD30C']
             if all(ticker in data for ticker in ccl_tickers):
-                var_al30 = 'AL30'
-                var_al30c = 'AL30C'
-                if var_al30 in data['AL30'].columns and var_al30c in data['AL30C'].columns:
-                    al30_data = data['AL30'][var_al30]
-                    al30c_data = data['AL30C'][var_al30c]
+                var_GD30 = 'GD30'
+                var_GD30c = 'GD30C'
+                if var_GD30 in data['GD30'].columns and var_GD30c in data['GD30C'].columns:
+                    GD30_data = data['GD30'][var_GD30]
+                    GD30c_data = data['GD30C'][var_GD30c]
                     # Evitar división por cero
-                    ratio = al30_data / al30c_data.replace(0, np.nan)
+                    ratio = GD30_data / GD30c_data.replace(0, np.nan)
                     result = result / ratio
                 else:
-                    st.error("No hay columnas 'AL30' o 'AL30C' disponibles en los datos.")
+                    st.error("No hay columnas 'GD30' o 'GD30C' disponibles en los datos.")
                     return None
             else:
-                st.error("No hay datos disponibles para **AL30** o **AL30C**.")
+                st.error("No hay datos disponibles para **GD30** o **GD30C**.")
                 return None
 
     if second_ticker and third_ticker:
@@ -584,8 +584,8 @@ def main():
         ccl_pair = ('YPFD.BA', 'YPF')
         ccl_checkbox_text = "🔄 Dividir el ticker principal por dólar CCL de YPF (YPFD.BA/YPF)"
     else:
-        ccl_pair = ('AL30', 'AL30C')
-        ccl_checkbox_text = "🔄 Dividir el ticker principal por dólar CCL (AL30/AL30C)"
+        ccl_pair = ('GD30', 'GD30C')
+        ccl_checkbox_text = "🔄 Dividir el ticker principal por dólar CCL (GD30/GD30C)"
 
     apply_ccl_ratio = st.checkbox(ccl_checkbox_text, value=False)
 
