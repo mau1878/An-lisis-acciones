@@ -773,6 +773,8 @@ def create_average_changes_visualization(monthly_data, metric_option, main_ticke
 
 def create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker):
     st.write("### 🔥 Mapa de Calor de Variaciones Mensuales")
+    
+    # Create pivot table for heatmap
     monthly_pivot = monthly_data.pivot_table(
         values='Cambio Mensual (%)',
         index=monthly_data.index.year,
@@ -780,95 +782,56 @@ def create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticke
         aggfunc='mean'
     )
 
-    # Definir colormap personalizado (rojo para negativo, verde para positivo)
+    # Number of years (rows) in the data
+    num_years = len(monthly_pivot.index)
+
+    # Dynamically adjust figure height based on number of years
+    base_height = 6  # Minimum height in inches
+    height_per_year = 0.4  # Height increment per year (adjust as needed)
+    fig_height = max(base_height, height_per_year * num_years)  # Ensure minimum height
+    fig_width = 12  # Fixed width for 12 months (adjustable)
+
+    # Define custom colormap
     cmap = get_custom_cmap()
 
-    fig, ax = plt.subplots(figsize=(12, 8))
+    # Create figure with dynamic size
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    # Generate heatmap
     sns.heatmap(
         monthly_pivot,
         cmap=cmap,
-        annot=True,
-        fmt=".2f",
+        annot=True,  # Show values in cells
+        fmt=".2f",   # Format numbers to 2 decimal places
         linewidths=0.5,
         center=0,
-        ax=ax
+        ax=ax,
+        annot_kws={"size": min(12, max(8, 120 / num_years))},  # Dynamic font size for annotations
+        cbar_kws={'label': 'Cambio Mensual (%)'}  # Add label to colorbar
     )
+
+    # Customize plot
     plt.title(f"Mapa de Calor de Variaciones Mensuales para {main_ticker}" +
               (f" / {second_ticker}" if second_ticker else "") +
-              (f" / {third_ticker}" if third_ticker else ""))
+              (f" / {third_ticker}" if third_ticker else ""),
+              pad=20)  # Add padding to title to avoid overlap
     plt.xlabel("Mes")
     plt.ylabel("Año")
-    # Agregar marca de agua
+
+    # Adjust month labels (1-12) to Spanish names for better readability
+    month_names = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
+                   'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+    ax.set_xticklabels(month_names, rotation=45)
+
+    # Add watermark
     plt.text(0.5, 0.01, "MTaurus - X: MTaurus_ok", fontsize=12, color='grey',
              ha='center', va='center', alpha=0.5, transform=ax.transAxes)
+
+    # Tight layout to prevent clipping
+    plt.tight_layout()
+
+    # Display in Streamlit
     st.pyplot(fig)
-
-def analyze_streaks(monthly_data, main_ticker):
-    st.write("### 📈 Análisis de Rachas")
-
-    monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
-    streaks = calculate_streaks(monthly_changes)
-
-    # Separar rachas positivas y negativas
-    positive_streaks = streaks[streaks['value'] > 0]
-    negative_streaks = streaks[streaks['value'] <= 0]
-
-    # Mostrar estadísticas
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write("#### Rachas Positivas")
-        if not positive_streaks.empty:
-            max_positive = positive_streaks.loc[positive_streaks['length'].idxmax()]
-            st.write(f"**Racha más larga:** {max_positive['length']} meses")
-            st.write(f"**Desde:** {max_positive['start'].strftime('%Y-%m')}")
-            st.write(f"**Hasta:** {max_positive['end'].strftime('%Y-%m')}")
-        else:
-            st.write("No hay rachas positivas.")
-
-    with col2:
-        st.write("#### Rachas Negativas")
-        if not negative_streaks.empty:
-            max_negative = negative_streaks.loc[negative_streaks['length'].idxmax()]
-            st.write(f"**Racha más larga:** {max_negative['length']} meses")
-            st.write(f"**Desde:** {max_negative['start'].strftime('%Y-%m')}")
-            st.write(f"**Hasta:** {max_negative['end'].strftime('%Y-%m')}")
-        else:
-            st.write("No hay rachas negativas.")
-
-def create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option):
-    # 1. Monthly Price Variations
-    st.write("### 📉 Variaciones Mensuales de Precios")
-    fig = px.line(
-        monthly_data,
-        x=monthly_data.index,
-        y='Cambio Mensual (%)',
-        title=f"Variaciones Mensuales de {main_ticker}" +
-              (f" / {second_ticker}" if second_ticker else "") +
-              (f" / {third_ticker}" if third_ticker else ""),
-        labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'}
-    )
-    fig.update_traces(mode='lines+markers')
-    st.plotly_chart(fig, use_container_width=True)
-
-    # 2. Histogram with Gaussian Fit
-    create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, third_ticker)
-
-    # 3. Monthly Heatmap
-    create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker)
-
-    # 4. Average Changes Visualization
-    create_average_changes_visualization(monthly_data, metric_option, main_ticker, second_ticker, third_ticker)
-
-    # 5. Rankings
-    create_monthly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
-    create_yearly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
-
-    # 6. Streak Analysis
-    analyze_streaks(monthly_data, main_ticker)
-
-    # 7. Statistics
-    display_statistics(monthly_data)
 
 def display_statistics(monthly_data):
     st.write("### 📊 Estadísticas Descriptivas")
