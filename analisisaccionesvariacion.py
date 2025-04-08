@@ -598,7 +598,7 @@ def main():
     start_date = st.date_input(
         "📅 Seleccione la fecha de inicio:",
         value=pd.to_datetime('2010-01-01').date(),
-        min_value=pd.to_datetime('1990-01-01').date()
+        min_value=pd.to_datetime('1920-01-01').date()
     )
     end_date = st.date_input(
         "📅 Seleccione la fecha de fin:",
