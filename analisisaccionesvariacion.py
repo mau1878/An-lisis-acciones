@@ -556,7 +556,27 @@ def create_yearly_ranking(monthly_data, main_ticker, second_ticker, third_ticker
     # Ajustar el diseño para evitar recortes
     plt.tight_layout()
     st.pyplot(fig)
+def create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option):
+    st.write("### 📉 Variaciones Mensuales de Precios")
+    fig = px.line(
+        monthly_data,
+        x=monthly_data.index,
+        y='Cambio Mensual (%)',
+        title=f"Variaciones Mensuales de {main_ticker}" +
+              (f" / {second_ticker}" if second_ticker else "") +
+              (f" / {third_ticker}" if third_ticker else ""),
+        labels={'Cambio Mensual (%)': 'Cambio Mensual (%)'}
+    )
+    fig.update_traces(mode='lines+markers')
+    st.plotly_chart(fig, use_container_width=True)
 
+    create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, third_ticker)
+    create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker)
+    create_average_changes_visualization(monthly_data, metric_option, main_ticker, second_ticker, third_ticker)
+    create_monthly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
+    create_yearly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
+    analyze_streaks(monthly_data, main_ticker)
+    display_statistics(monthly_data)
 # Main UI Layout
 def main():
     # Title and Header
@@ -620,29 +640,16 @@ def main():
     # Validate and process data
     if all(validate_ticker_format(ticker, data_source) for ticker in tickers if ticker):
         data = fetch_data(tickers, start_date, end_date, data_source)
-
         if data:
-            # Align dates and fill missing values
             data = align_dates(data)
-
-            # Evaluate ratio based on selected tickers
             ratio_data = evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_ratio, data_source)
-
             if ratio_data is not None:
-                # Convert to DataFrame if it's a Series
                 if isinstance(ratio_data, pd.Series):
                     ratio_data = ratio_data.to_frame(name='Adj Close')
-
                 ratio_data.index = pd.to_datetime(ratio_data.index)
-
-                # Create a copy of DataFrame to avoid SettingWithCopyWarning
                 ratio_data = ratio_data.copy()
                 ratio_data['Month'] = ratio_data.index.to_period('M')
-
-                # Resample to monthly and forward fill
                 monthly_data = ratio_data.resample('M').ffill()
-
-                # Verify if 'Adj Close' is present after resampling
                 main_var = main_ticker.replace('.', '_')
                 if 'Adj Close' in monthly_data.columns:
                     pct_change_col = 'Adj Close'
@@ -651,13 +658,8 @@ def main():
                 else:
                     st.error(f"'{main_var}' no está disponible en los datos después del resampleo.")
                     return
-
-                # Calculate monthly percentage change
                 monthly_data['Cambio Mensual (%)'] = monthly_data[pct_change_col].pct_change() * 100
-
-                # Visualizations
                 create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option)
-
 def create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, third_ticker):
     st.write("### 📊 Histograma de Variaciones Mensuales con Ajuste de Gauss")
     monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
