@@ -11,6 +11,7 @@ import requests
 from datetime import datetime
 import logging
 import urllib3
+from curl_cffi import requests as cffi_requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,16 +47,8 @@ def validate_ticker_format(ticker, data_source):
 # Data Download Functions
 def descargar_datos_yfinance(ticker, start, end):
     try:
-        # Create a session with custom headers to simulate a browser
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-        })
+        # Create a curl_cffi session with browser impersonation
+        session = cffi_requests.Session(impersonate="chrome124")  # Use latest Chrome version or "chrome" for latest available
 
         # Pass the session to yfinance
         stock_data = yf.download(ticker, start=start, end=end, progress=False, session=session)
