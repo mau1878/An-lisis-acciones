@@ -46,7 +46,19 @@ def validate_ticker_format(ticker, data_source):
 # Data Download Functions
 def descargar_datos_yfinance(ticker, start, end):
     try:
-        stock_data = yf.download(ticker, start=start, end=end, progress=False)
+        # Create a session with custom headers to simulate a browser
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        })
+
+        # Pass the session to yfinance
+        stock_data = yf.download(ticker, start=start, end=end, progress=False, session=session)
 
         if stock_data.empty:
             logger.warning(f"No se encontraron datos para el ticker {ticker} en el rango de fechas seleccionado.")
@@ -54,9 +66,8 @@ def descargar_datos_yfinance(ticker, start, end):
 
         stock_data = stock_data.reset_index()
 
-        # Manejar tanto columnas de un solo nivel como MultiIndex
+        # Handle both single-level and MultiIndex columns
         if isinstance(stock_data.columns, pd.MultiIndex):
-            # Extraer 'Close' o 'Adj Close' según esté disponible
             if ('Close', ticker) in stock_data.columns:
                 close_price = stock_data[('Close', ticker)]
                 var_name = ticker.replace('.', '_')
@@ -75,7 +86,6 @@ def descargar_datos_yfinance(ticker, start, end):
                 logger.error(f"No se encontró 'Close' o 'Adj Close' para el ticker {ticker}.")
                 return pd.DataFrame()
         else:
-            # Columnas de un solo nivel
             if 'Close' in stock_data.columns:
                 close_col = 'Close'
             elif 'Adj Close' in stock_data.columns:
@@ -90,7 +100,7 @@ def descargar_datos_yfinance(ticker, start, end):
                 var_name: stock_data[close_col]
             })
 
-        # Ajustar precios por splits si es necesario
+        # Adjust prices for splits if necessary
         df = ajustar_precios_por_splits(df, ticker)
 
         return df
