@@ -25,8 +25,11 @@ st.set_page_config(
 )
 
 # Utility Functions
-def get_custom_cmap():
-    colors = ['red', 'white', 'green']
+def get_custom_cmap(color_order='red_white_green'):
+    if color_order == 'red_white_green':
+        colors = ['red', 'white', 'green']
+    else:  # green_white_red
+        colors = ['green', 'white', 'red']
     return LinearSegmentedColormap.from_list('custom_diverging', colors)
 
 def ajustar_precios_por_splits(df, ticker):
@@ -559,7 +562,7 @@ def create_yearly_ranking(monthly_data, main_ticker, second_ticker, third_ticker
     # Ajustar el diseño para evitar recortes
     plt.tight_layout()
     st.pyplot(fig)
-def create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option):
+def create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option, color_order='red_white_green'):
     st.write("### 📉 Variaciones Mensuales de Precios")
     fig = px.line(
         monthly_data,
@@ -574,7 +577,7 @@ def create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker
     st.plotly_chart(fig, use_container_width=True)
 
     create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, third_ticker)
-    create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker)
+    create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker, color_order)
     create_average_changes_visualization(monthly_data, metric_option, main_ticker, second_ticker, third_ticker)
     create_monthly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
     create_yearly_ranking(monthly_data, main_ticker, second_ticker, third_ticker)
@@ -634,6 +637,20 @@ def main():
         ("Promedio", "Mediana")
     )
 
+    # Colormap Selection
+    color_order = st.selectbox(
+        "🌈 Seleccione el esquema de colores para el mapa de calor:",
+        options=['Red-White-Green', 'Green-White-Red'],
+        format_func=lambda x: 'Rojo-Blanco-Verde' if x == 'Red-White-Green' else 'Verde-Blanco-Rojo'
+    )
+
+    # Map user-friendly labels to internal values
+    color_order_map = {
+        'Red-White-Green': 'red_white_green',
+        'Green-White-Red': 'green_white_red'
+    }
+    selected_color_order = color_order_map[color_order]
+
     # Process tickers
     tickers = {main_ticker, second_ticker, third_ticker}
     tickers = {ticker.upper() for ticker in tickers if ticker}
@@ -662,7 +679,7 @@ def main():
                     st.error(f"'{main_var}' no está disponible en los datos después del resampleo.")
                     return
                 monthly_data['Cambio Mensual (%)'] = monthly_data[pct_change_col].pct_change() * 100
-                create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option)
+                create_visualizations(monthly_data, main_ticker, second_ticker, third_ticker, metric_option, selected_color_order)
 def create_histogram_with_gaussian(monthly_data, main_ticker, second_ticker, third_ticker):
     st.write("### 📊 Histograma de Variaciones Mensuales con Ajuste de Gauss")
     monthly_changes = monthly_data['Cambio Mensual (%)'].dropna()
@@ -776,7 +793,7 @@ def create_average_changes_visualization(monthly_data, metric_option, main_ticke
     plt.tight_layout()
     st.pyplot(fig)
 
-def create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker):
+def create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticker, color_order='red_white_green'):
     st.write("### 🔥 Mapa de Calor de Variaciones Mensuales")
     
     # Create pivot table for heatmap
@@ -797,7 +814,7 @@ def create_monthly_heatmap(monthly_data, main_ticker, second_ticker, third_ticke
     fig_width = 12  # Fixed width for 12 months (adjustable)
 
     # Define custom colormap
-    cmap = get_custom_cmap()
+    cmap = get_custom_cmap(color_order)
 
     # Create figure with dynamic size
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
