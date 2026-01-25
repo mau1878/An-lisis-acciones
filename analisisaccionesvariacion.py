@@ -472,25 +472,93 @@ def main():
     st.title("📈 Análisis de Variación de Precios - MTaurus")
     st.markdown("Seguinos en [X → @MTaurus_ok](https://x.com/MTaurus_ok)")
 
-    data_src = st.selectbox("Fuente de datos", ['yfinance', 'analisistecnico', 'iol', 'byma'])
-    apply_ccl = st.checkbox("Aplicar ratio CCL" + (" (YPF)" if data_src=='yfinance' else " (GD30)"))
+    data_src = st.selectbox(
+        "Fuente de datos",
+        options=['yfinance', 'analisistecnico', 'iol', 'byma'],
+        help="Elegí de dónde bajar los precios históricos.\n\n"
+             "- yfinance: datos globales (Yahoo Finance), incluye muchos tickers argentinos\n"
+             "- analisistecnico / iol / byma: fuentes argentinas específicas (pueden tener más precisión local pero dependen de cookies/sesiones)"
+    )
 
-    main_ticker = st.text_input("Ticker principal", "").strip().upper()
-    sec_ticker  = st.text_input("Segundo ticker (opcional)", "").strip().upper()
-    third_ticker = st.text_input("Tercer ticker (opcional)", "").strip().upper()
+    apply_ccl = st.checkbox(
+        "Aplicar ratio CCL",
+        value=False,
+        help="Marca esta opción si querés 'dolarizar' el ticker principal dividiendo su precio por el dólar CCL.\n\n"
+             "- Con yfinance: usa YPFD.BA / YPF\n"
+             "- Con otras fuentes: usa GD30 / GD30C\n\n"
+             "Muy útil para ver la performance en dólares CCL y comparar con activos en el exterior."
+    )
+
+    main_ticker = st.text_input(
+        "Ticker principal",
+        value="",
+        help="El activo que querés analizar en profundidad (aparece en todos los títulos y gráficos principales).\n\n"
+             "Ejemplos: GGAL.BA, AAPL, BMA, AL30, MELI, YPF, TSLA"
+    )
+
+    sec_ticker = st.text_input(
+        "Segundo ticker (opcional)",
+        value="",
+        help="Úsalo para crear un ratio o dividir el principal por este ticker.\n\n"
+             "Ejemplos comunes:\n"
+             "- Dividir un ADR por su equivalente en pesos (GGAL / GGAL.BA)\n"
+             "- Comparar con un banco o sector (COME / BMA)\n"
+             "- Normalizar por otro activo"
+    )
+
+    third_ticker = st.text_input(
+        "Tercer ticker (opcional)",
+        value="",
+        help="Permite agregar un segundo divisor en cadena.\n\n"
+             "Ejemplo: principal / segundo / tercero\n"
+             "Útil para ratios más complejos (poco común, pero disponible)."
+    )
 
     col1, col2 = st.columns(2)
-    with col1: start_dt = st.date_input("Desde", pd.to_datetime("2010-01-01").date())
-    with col2: end_dt   = st.date_input("Hasta", datetime.today().date())
+    with col1:
+        start_dt = st.date_input(
+            "Desde",
+            value=pd.to_datetime("2010-01-01").date(),
+            help="Fecha más antigua desde la cual descargar datos históricos.\n\n"
+                 "Cuanto más atrás, más completo el análisis (pero puede tardar más en cargar)."
+        )
+    with col2:
+        end_dt = st.date_input(
+            "Hasta",
+            value=datetime.today().date(),
+            help="Fecha más reciente de los datos.\n\n"
+                 "Por defecto es hoy. Podés poner una fecha anterior si querés comparar períodos específicos."
+        )
 
-    period_choice = st.radio("Período de análisis", ["Mes a Mes", "Trimestre a Trimestre"])
+    period_choice = st.radio(
+        "Período de análisis",
+        options=["Mes a Mes", "Trimestre a Trimestre"],
+        help="Define cómo agrupamos y calculamos las variaciones:\n\n"
+             "- Mes a Mes: variación mes contra mes anterior (más detalle)\n"
+             "- Trimestre a Trimestre: variación trimestre contra trimestre anterior (más estable, menos ruido)"
+    )
     freq = 'M' if period_choice == "Mes a Mes" else 'Q'
     per_label = "Mensual" if period_choice == "Mes a Mes" else "Trimestral"
 
-    metric_choice = st.radio("Métrica", ["Promedio", "Mediana"])
+    metric_choice = st.radio(
+        "Métrica",
+        options=["Promedio", "Mediana"],
+        help="Qué valor representativo usar en barras, heatmap y resúmenes:\n\n"
+             "- Promedio: sensible a valores extremos (outliers)\n"
+             "- Mediana: más robusta, ignora mejor los valores muy altos/bajos"
+    )
 
-    color_choice = st.selectbox("Colores Heatmap", ["Rojo → Blanco → Verde", "Verde → Blanco → Rojo"])
+    color_choice = st.selectbox(
+        "Colores Heatmap",
+        options=["Rojo → Blanco → Verde", "Verde → Blanco → Rojo"],
+        help="Orden de colores en el mapa de calor:\n\n"
+             "- Rojo → Blanco → Verde: rojo = caídas fuertes, verde = subas fuertes (el más intuitivo para la mayoría)\n"
+             "- Verde → Blanco → Rojo: al revés (a veces preferido en finanzas para que positivo sea verde)"
+    )
     cmap_key = 'red_white_green' if "Rojo" in color_choice else 'green_white_red'
+
+    # Resto del código sigue igual (tickers_set, if st.button("Analizar") ... )
+    # ...
 
     tickers_set = {t for t in [main_ticker, sec_ticker, third_ticker] if t}
     if apply_ccl:
