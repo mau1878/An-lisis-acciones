@@ -13,7 +13,7 @@ import logging
 import urllib3
 from curl_cffi import requests as cffi_requests
 
-# ─── Configuración ───
+# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -310,8 +310,8 @@ def create_drawdown_visualization(prices, main_ticker, second=None, third=None):
                   title=title, template='plotly_dark',
                   labels={'value': 'Drawdown (%)'})
     fig.update_traces(line_color='crimson', fillcolor='rgba(220,20,60,0.3)')
-    fig.add_annotation(text="MTaurus - X: MTaurus_ok", x=0.5, y=0.5, xref="paper", yref="paper",
-                       showarrow=False, font_size=38, opacity=0.22, textangle=-42)
+    fig.add_annotation(text="MTaurus - X: MTaurus_ok", xref="paper", yref="paper",
+                       x=0.5, y=0.5, showarrow=False, font_size=38, opacity=0.22, textangle=-42)
     st.plotly_chart(fig, use_container_width=True)
 
 # ─── VISUALIZACIONES ───
@@ -361,7 +361,16 @@ def create_average_changes_visualization(monthly_data, metric, main, sec, third,
         grp = monthly_data.index.quarter
         lbl = "Trimestre"
         names = ['Q1','Q2','Q3','Q4']
-    avg = monthly_data.groupby(grp)[f'Cambio {period_label} (%)'].agg(metric.lower())
+    col_name = f'Cambio {period_label} (%)'
+
+    if metric == "Promedio":
+        avg = monthly_data.groupby(grp)[col_name].mean()
+    elif metric == "Mediana":
+        avg = monthly_data.groupby(grp)[col_name].median()
+    else:
+        st.error(f"Métrica no soportada: {metric}")
+        return
+
     avg.index = [names[i-1] for i in avg.index]
     fig, ax = plt.subplots(figsize=(10,5))
     bars = ax.bar(avg.index, avg, color=['#4caf50' if v>=0 else '#ef5350' for v in avg])
