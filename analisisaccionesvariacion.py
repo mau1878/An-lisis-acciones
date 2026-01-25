@@ -518,7 +518,8 @@ def main():
     with col1:
         start_dt = st.date_input(
             "Desde",
-            value=pd.to_datetime("2010-01-01").date(),
+            value=pd.to_datetime("2010-01-01").date(),  # This remains the default selected date
+            min_value=pd.to_datetime("1920-01-01").date(), # <--- ADD THIS LINE
             help="Fecha más antigua desde la cual descargar datos históricos.\n\n"
                  "Cuanto más atrás, más completo el análisis (pero puede tardar más en cargar)."
         )
