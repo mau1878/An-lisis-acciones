@@ -315,7 +315,8 @@ def create_drawdown_visualization(prices, main_ticker, second=None, third=None):
     st.plotly_chart(fig, use_container_width=True)
 
 # ─── VISUALIZACIONES ───
-def create_histogram_with_gaussian(monthly_data, main, sec, third, period_label):
+def create_histogram_with_gaussian(monthly_data, main, sec, third, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
     st.subheader(f"Histograma de Cambios {period_label}es")
     changes = monthly_data[f'Cambio {period_label} (%)'].dropna()
     fig, ax = plt.subplots(figsize=(10,6))
@@ -327,12 +328,13 @@ def create_histogram_with_gaussian(monthly_data, main, sec, third, period_label)
         val = np.percentile(changes, p)
         ax.axvline(val, color=c, ls='--', alpha=0.8)
         ax.text(val+0.5, ax.get_ylim()[1]*0.92, f'{val:.1f}', color=c, fontsize=10)
-    ax.set_title(f"Histograma {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else ""))
+    ax.set_title(f"Histograma {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
     add_watermark(ax)
     st.pyplot(fig)
 
-def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_period, period_label):
+def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_period, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
     st.subheader(f"Mapa de Calor {period_label}")
     if analysis_period == "Mes a Mes":
         idx = monthly_data.index.month
@@ -346,12 +348,13 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
     sns.heatmap(pivot, cmap=get_custom_cmap(color_order), annot=True, fmt=".1f",
                 center=0, linewidths=0.5, ax=ax)
     ax.set_xticklabels([names[i-1] for i in pivot.columns], rotation=45)
-    ax.set_title(f"Heatmap {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else ""))
+    ax.set_title(f"Heatmap {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
     add_watermark(ax)
     st.pyplot(fig)
 
-def create_average_changes_visualization(monthly_data, metric, main, sec, third, analysis_period, period_label):
+def create_average_changes_visualization(monthly_data, metric, main, sec, third, analysis_period, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
     st.subheader(f"Cambios {metric} {period_label}es")
     if analysis_period == "Mes a Mes":
         grp = monthly_data.index.month
@@ -374,12 +377,13 @@ def create_average_changes_visualization(monthly_data, metric, main, sec, third,
     avg.index = [names[i-1] for i in avg.index]
     fig, ax = plt.subplots(figsize=(10,5))
     bars = ax.bar(avg.index, avg, color=['#4caf50' if v>=0 else '#ef5350' for v in avg])
-    ax.set_title(f"{metric} por {lbl} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else ""))
+    ax.set_title(f"{metric} por {lbl} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
     add_watermark(ax)
     st.pyplot(fig)
 
-def create_period_ranking(monthly_data, main, sec, third, analysis_period, period_label):
+def create_period_ranking(monthly_data, main, sec, third, analysis_period, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
     st.subheader(f"Ranking {period_label}es Positivos/Negativos")
     if analysis_period == "Mes a Mes":
         grp = monthly_data.index.month
@@ -396,12 +400,13 @@ def create_period_ranking(monthly_data, main, sec, third, analysis_period, perio
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=45)
     ax.legend()
-    ax.set_title(f"Ranking {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else ""))
+    ax.set_title(f"Ranking {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
     add_watermark(ax)
     st.pyplot(fig)
 
-def create_yearly_ranking(monthly_data, main, sec, third, period_label):
+def create_yearly_ranking(monthly_data, main, sec, third, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
     st.subheader("Ranking Anual Positivos/Negativos")
     pos = monthly_data.groupby(monthly_data.index.year)[f'Cambio {period_label} (%)'].apply(lambda x: (x>0).sum())
     neg = monthly_data.groupby(monthly_data.index.year)[f'Cambio {period_label} (%)'].apply(lambda x: (x<0).sum())
@@ -413,7 +418,7 @@ def create_yearly_ranking(monthly_data, main, sec, third, period_label):
     ax.set_xticks(x)
     ax.set_xticklabels(years, rotation=45)
     ax.legend()
-    ax.set_title(f"Ranking Anual - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else ""))
+    ax.set_title(f"Ranking Anual - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
     add_watermark(ax)
     st.pyplot(fig)
@@ -443,6 +448,7 @@ def analyze_streaks(monthly_data, main_ticker, period_label):
         st.write(f"Racha **{dir_str}** de **{r['length']}** {period_label.lower()}es | {r['start'].date()} → {r['end'].date()}")
 
 def create_visualizations(monthly_data, main, sec, third, metric_opt, color_ord, anal_per, per_lbl, daily_data, price_col):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
     title_suf = f" / {sec}" if sec else ""
     title_suf += f" / {third}" if third else ""
 
@@ -586,7 +592,8 @@ def main():
             create_visualizations(
                 df_period, main_ticker, sec_ticker, third_ticker,
                 metric_choice, cmap_key, period_choice, per_label,
-                df_daily, 'Price'
+                df_daily, 'Price',
+                apply_ccl  # ← agregar este parámetro
             )
 
     st.markdown("---")
