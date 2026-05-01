@@ -538,7 +538,7 @@ def main():
              "- Mes a Mes: variación mes contra mes anterior (más detalle)\n"
              "- Trimestre a Trimestre: variación trimestre contra trimestre anterior (más estable, menos ruido)"
     )
-    freq = 'M' if period_choice == "Mes a Mes" else 'Q'
+    freq = 'ME' if period_choice == "Mes a Mes" else 'QE'          # ← CAMBIO AQUÍ
     per_label = "Mensual" if period_choice == "Mes a Mes" else "Trimestral"
 
     metric_choice = st.radio(
