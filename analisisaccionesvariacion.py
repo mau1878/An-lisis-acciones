@@ -297,7 +297,8 @@ def calculate_drawdown(prices):
     dd = (prices - peak) / peak * 100
     return dd
 
-def create_drawdown_visualization(prices, main_ticker, second=None, third=None):
+def create_drawdown_visualization(prices, main_ticker, second=None, third=None, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
     st.subheader("Drawdown del Ticker Principal")
     dd = calculate_drawdown(prices)
     max_dd = dd.min()
@@ -305,7 +306,10 @@ def create_drawdown_visualization(prices, main_ticker, second=None, third=None):
     col1, col2 = st.columns(2)
     col1.metric("Máximo Drawdown", f"{max_dd:.2f}%")
     col2.metric("Drawdown Actual", f"{current_dd:.2f}%")
-    title = f"Drawdown - {main_ticker}" + (f" / {second}" if second else "") + (f" / {third}" if third else "")
+    
+    title = f"Drawdown - {main_ticker}" + (f" / {second}" if second else "") + \
+            (f" / {third}" if third else "") + ccl_text
+    
     fig = px.area(dd.reset_index(), x='index', y=dd.name,
                   title=title, template='plotly_dark',
                   labels={'value': 'Drawdown (%)'})
@@ -447,29 +451,34 @@ def analyze_streaks(monthly_data, main_ticker, period_label):
         dir_str = "positiva" if r['value'] > 0 else "negativa"
         st.write(f"Racha **{dir_str}** de **{r['length']}** {period_label.lower()}es | {r['start'].date()} → {r['end'].date()}")
 
-def create_visualizations(monthly_data, main, sec, third, metric_opt, color_ord, anal_per, per_lbl, daily_data, price_col):
+def create_visualizations(monthly_data, main, sec, third, metric_opt, color_ord, 
+                         anal_per, per_lbl, daily_data, price_col, apply_ccl=False):
     ccl_text = " - CCL aplicado" if apply_ccl else ""
     title_suf = f" / {sec}" if sec else ""
     title_suf += f" / {third}" if third else ""
 
+    # Gráfico de líneas principal
     fig_line = px.line(monthly_data, x=monthly_data.index, y=f'Cambio {per_lbl} (%)',
-                       title=f"Variaciones {per_lbl}es - {main}{title_suf}",
+                       title=f"Variaciones {per_lbl}es - {main}{title_suf}{ccl_text}",
                        template='plotly_dark')
     fig_line.update_traces(mode='lines+markers')
-    fig_line.add_annotation(text="MTaurus - X: MTaurus_ok", xref="paper", yref="paper", x=0.5, y=0.5,
-                            showarrow=False, font_size=34, opacity=0.22, textangle=-42)
+    fig_line.add_annotation(text="MTaurus - X: MTaurus_ok", xref="paper", yref="paper", 
+                            x=0.5, y=0.5, showarrow=False, font_size=34, 
+                            opacity=0.22, textangle=-42)
     st.plotly_chart(fig_line, use_container_width=True)
 
-    create_histogram_with_gaussian(monthly_data, main, sec, third, per_lbl)
-    create_period_heatmap(monthly_data, main, sec, third, color_ord, anal_per, per_lbl)
-    create_average_changes_visualization(monthly_data, metric_opt, main, sec, third, anal_per, per_lbl)
-    create_period_ranking(monthly_data, main, sec, third, anal_per, per_lbl)
-    create_yearly_ranking(monthly_data, main, sec, third, per_lbl)
+    # Llamadas a las funciones hijas (ahora con el parámetro apply_ccl)
+    create_histogram_with_gaussian(monthly_data, main, sec, third, per_lbl, apply_ccl)
+    create_period_heatmap(monthly_data, main, sec, third, color_ord, anal_per, per_lbl, apply_ccl)
+    create_average_changes_visualization(monthly_data, metric_opt, main, sec, third, anal_per, per_lbl, apply_ccl)
+    create_period_ranking(monthly_data, main, sec, third, anal_per, per_lbl, apply_ccl)
+    create_yearly_ranking(monthly_data, main, sec, third, per_lbl, apply_ccl)
+    
     display_statistics(monthly_data, per_lbl)
-
+    
     if price_col in daily_data.columns:
-        create_drawdown_visualization(daily_data[price_col], main, sec, third)
-
+        create_drawdown_visualization(daily_data[price_col], main, sec, third, apply_ccl)
+    
     with st.expander(f"📊 Análisis de Rachas ({per_lbl.lower()}es)", expanded=False):
         analyze_streaks(monthly_data, main, per_lbl)
 
@@ -593,7 +602,7 @@ def main():
                 df_period, main_ticker, sec_ticker, third_ticker,
                 metric_choice, cmap_key, period_choice, per_label,
                 df_daily, 'Price',
-                apply_ccl  # ← agregar este parámetro
+                apply_ccl   # ← este parámetro ya está correcto
             )
 
     st.markdown("---")
