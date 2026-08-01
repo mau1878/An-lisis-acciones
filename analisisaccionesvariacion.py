@@ -243,7 +243,14 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
     if apply_ccl_ratio:
         if data_source == 'yfinance':
             if 'YPFD.BA' in data and 'YPF' in data:
-                ratio = data['YPFD.BA']['YPFD_BA'] / data['YPF']['YPF']
+                ypfd = data['YPFD.BA']['YPFD_BA'].copy()
+                ypf  = data['YPF']['YPF']
+    
+                # 10-for-1 split on YPFD.BA effective 2026-07-23
+                split_date = pd.Timestamp('2026-07-23')
+                ypfd.loc[ypfd.index >= split_date] *= 10
+    
+                ratio = ypfd / ypf
                 result = result / ratio
         else:
             if 'GD30' in data and 'GD30C' in data:
