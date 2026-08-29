@@ -241,17 +241,14 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
     var_main = main_ticker.replace('.', '_')
     result = data[main_ticker][var_main]
     if apply_ccl_ratio:
-        if data_source == 'yfinance':
-            if 'YPFD.BA' in data and 'YPF' in data:
-                ypfd = data['YPFD.BA']['YPFD_BA'].copy()
-                ypf  = data['YPF']['YPF']
-    
-                # 10-for-1 split on YPFD.BA effective 2026-07-23
-                split_date = pd.Timestamp('2026-07-23')
-                ypfd.loc[ypfd.index >= split_date] *= 10
-    
-                ratio = ypfd / ypf
-                result = result / ratio
+    if data_source == 'yfinance':
+        if 'YPFD.BA' in data and 'YPF' in data:
+            ypfd = data['YPFD.BA']['YPFD_BA']
+            ypf = data['YPF']['YPF']
+            # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
+            ratio = (ypfd * 10) / ypf
+            result = result / ratio
+
         else:
             if 'GD30' in data and 'GD30C' in data:
                 ratio = data['GD30']['GD30'] / data['GD30C']['GD30C']
