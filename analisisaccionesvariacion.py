@@ -234,25 +234,26 @@ def align_dates(data):
     for ticker in data:
         data[ticker] = data[ticker].reindex(all_dates).ffill()
     return data
-
 def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_ratio, data_source):
     if not main_ticker or main_ticker not in data or data[main_ticker].empty:
         return None
+
     var_main = main_ticker.replace('.', '_')
     result = data[main_ticker][var_main]
-    if apply_ccl_ratio:
-    if data_source == 'yfinance':
-        if 'YPFD.BA' in data and 'YPF' in data:
-            ypfd = data['YPFD.BA']['YPFD_BA']
-            ypf = data['YPF']['YPF']
-            # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
-            ratio = (ypfd * 10) / ypf
-            result = result / ratio
 
+    if apply_ccl_ratio:
+        if data_source == 'yfinance':
+            if 'YPFD.BA' in data and 'YPF' in data:
+                ypfd = data['YPFD.BA']['YPFD_BA']
+                ypf = data['YPF']['YPF']
+                # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
+                ratio = (ypfd * 10) / ypf
+                result = result / ratio
         else:
             if 'GD30' in data and 'GD30C' in data:
                 ratio = data['GD30']['GD30'] / data['GD30C']['GD30C']
                 result = result / ratio
+
     if second_ticker and third_ticker and second_ticker in data and third_ticker in data:
         var2 = second_ticker.replace('.', '_')
         var3 = third_ticker.replace('.', '_')
@@ -261,6 +262,7 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
     elif second_ticker and second_ticker in data:
         var2 = second_ticker.replace('.', '_')
         result = result / data[second_ticker][var2]
+
     return result
 
 def calculate_streaks(series):
