@@ -7,6 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import requests
 from datetime import datetime
 import logging
@@ -76,6 +77,18 @@ def get_custom_cmap(color_order='red_white_green'):
     else:
         colors = ['#388e3c', '#ffffff', '#d32f2f']
     return LinearSegmentedColormap.from_list('custom_diverging', colors)
+
+def get_yearly_cmap():
+    # Paleta distinta (púrpura-blanco-naranja) para no mezclar la escala anual con la mensual/trimestral
+    colors = ['#7b3294', '#ffffff', '#e66101']
+    return LinearSegmentedColormap.from_list('yearly_diverging', colors)
+
+def calculate_yearly_changes(daily_data, price_col):
+    # Mismo método que mensual/trimestral: último valor del período vs último del período anterior
+    yearly_price = daily_data[price_col].resample('YE').last()
+    yearly_change = yearly_price.pct_change() * 100
+    yearly_change.index = yearly_change.index.year
+    return yearly_change
 
 def ajustar_precios_por_splits(df, ticker):
     return df
@@ -343,9 +356,10 @@ def create_histogram_with_gaussian(monthly_data, main, sec, third, period_label,
     add_watermark(ax)
     st.pyplot(fig)
 
-def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_period, period_label, apply_ccl=False):
+def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_period, period_label,
+                          daily_data, price_col, apply_ccl=False):
     ccl_text = " - CCL aplicado" if apply_ccl else ""
-    st.subheader(f"Mapa de Calor {period_label}")
+    st.subheader(f"Mapa de Calor {period_label} (+ columna de cambio anual)")
     if analysis_period == "Mes a Mes":
         idx = monthly_data.index.month
         names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -354,12 +368,41 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
         names = ['Q1','Q2','Q3','Q4']
     pivot = monthly_data.pivot_table(values=f'Cambio {period_label} (%)',
                                      index=monthly_data.index.year, columns=idx, aggfunc='mean')
-    fig, ax = plt.subplots(figsize=(12, max(6, len(pivot)*0.4)))
-    sns.heatmap(pivot, cmap=get_custom_cmap(color_order), annot=True, fmt=".1f",
-                center=0, linewidths=0.5, ax=ax)
-    ax.set_xticklabels([names[i-1] for i in pivot.columns], rotation=45)
+
+    # Columna extra con el cambio anual (mismo método last-vs-last, calculado sobre el precio diario)
+    yearly_change = calculate_yearly_changes(daily_data, price_col)
+    combined = pivot.copy()
+    combined['Año'] = yearly_change.reindex(pivot.index)
+    year_col_idx = pivot.shape[1]
+
+    mask_main = np.zeros(combined.shape, dtype=bool)
+    mask_main[:, year_col_idx] = True  # ocultar la columna 'Año' en el heatmap principal
+
+    mask_year = np.ones(combined.shape, dtype=bool)
+    mask_year[:, year_col_idx] = combined['Año'].isna().values  # mostrar solo donde hay dato anual
+
+    valid_year_vals = combined['Año'].dropna()
+    max_abs_year = np.abs(valid_year_vals).max() if not valid_year_vals.empty else 1
+
+    fig, ax = plt.subplots(figsize=(13, max(6, len(pivot)*0.4)))
+    divider = make_axes_locatable(ax)
+    cax1 = divider.append_axes("right", size="3%", pad=0.6)
+    cax2 = divider.append_axes("right", size="3%", pad=0.9)
+
+    sns.heatmap(combined, mask=mask_main, cmap=get_custom_cmap(color_order), annot=True, fmt=".1f",
+                center=0, linewidths=0.5, ax=ax, cbar_ax=cax1,
+                cbar_kws={'label': f'Cambio {period_label} (%)'})
+    sns.heatmap(combined, mask=mask_year, cmap=get_yearly_cmap(), annot=True, fmt=".1f",
+                center=0, vmin=-max_abs_year, vmax=max_abs_year, linewidths=0.5, ax=ax, cbar_ax=cax2,
+                cbar_kws={'label': 'Cambio Anual (%)'})
+
+    ax.set_xticklabels([names[i-1] for i in pivot.columns] + ['Año'], rotation=45)
     ax.set_title(f"Heatmap {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
+    for cax in (cax1, cax2):
+        cax.tick_params(colors='white')
+        cax.yaxis.label.set_color('white')
+        cax.set_facecolor('#0e1117')
     add_watermark(ax)
     st.pyplot(fig)
 
@@ -392,9 +435,10 @@ def create_average_changes_visualization(monthly_data, metric, main, sec, third,
     add_watermark(ax)
     st.pyplot(fig)
 
-def create_period_ranking(monthly_data, main, sec, third, analysis_period, period_label, apply_ccl=False):
+def create_period_ranking(monthly_data, main, sec, third, analysis_period, period_label,
+                          daily_data, price_col, apply_ccl=False):
     ccl_text = " - CCL aplicado" if apply_ccl else ""
-    st.subheader(f"Ranking {period_label}es Positivos/Negativos")
+    st.subheader(f"Ranking {period_label}es Positivos/Negativos (+ total de años)")
     if analysis_period == "Mes a Mes":
         grp = monthly_data.index.month
         names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -403,12 +447,23 @@ def create_period_ranking(monthly_data, main, sec, third, analysis_period, perio
         names = ['Q1','Q2','Q3','Q4']
     pos = monthly_data.groupby(grp)[f'Cambio {period_label} (%)'].apply(lambda x: (x>0).sum())
     neg = monthly_data.groupby(grp)[f'Cambio {period_label} (%)'].apply(lambda x: (x<0).sum())
-    fig, ax = plt.subplots(figsize=(10,6))
-    x = np.arange(len(names))
-    ax.bar(x - 0.2, pos, 0.4, label='Positivos', color='#4caf50')
-    ax.bar(x + 0.2, neg, 0.4, label='Negativos', color='#ef5350')
+
+    # Bucket extra: total de años positivos vs negativos (mismo cálculo last-vs-last que el heatmap)
+    yearly_change = calculate_yearly_changes(daily_data, price_col).dropna()
+    pos_years = int((yearly_change > 0).sum())
+    neg_years = int((yearly_change < 0).sum())
+
+    all_names = names + ['Año']
+    pos_vals = list(pos) + [pos_years]
+    neg_vals = list(neg) + [neg_years]
+
+    fig, ax = plt.subplots(figsize=(11,6))
+    x = np.arange(len(all_names))
+    ax.bar(x - 0.2, pos_vals, 0.4, label='Positivos', color='#4caf50')
+    ax.bar(x + 0.2, neg_vals, 0.4, label='Negativos', color='#ef5350')
+    ax.axvline(len(names) - 0.5, color='white', ls=':', alpha=0.4)  # separa visualmente el bucket "Año"
     ax.set_xticks(x)
-    ax.set_xticklabels(names, rotation=45)
+    ax.set_xticklabels(all_names, rotation=45)
     ax.legend()
     ax.set_title(f"Ranking {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
@@ -475,9 +530,9 @@ def create_visualizations(monthly_data, main, sec, third, metric_opt, color_ord,
 
     # Llamadas a las funciones hijas (ahora con el parámetro apply_ccl)
     create_histogram_with_gaussian(monthly_data, main, sec, third, per_lbl, apply_ccl)
-    create_period_heatmap(monthly_data, main, sec, third, color_ord, anal_per, per_lbl, apply_ccl)
+    create_period_heatmap(monthly_data, main, sec, third, color_ord, anal_per, per_lbl, daily_data, price_col, apply_ccl)
     create_average_changes_visualization(monthly_data, metric_opt, main, sec, third, anal_per, per_lbl, apply_ccl)
-    create_period_ranking(monthly_data, main, sec, third, anal_per, per_lbl, apply_ccl)
+    create_period_ranking(monthly_data, main, sec, third, anal_per, per_lbl, daily_data, price_col, apply_ccl)
     create_yearly_ranking(monthly_data, main, sec, third, per_lbl, apply_ccl)
     
     display_statistics(monthly_data, per_lbl)
