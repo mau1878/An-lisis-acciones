@@ -78,9 +78,13 @@ def get_custom_cmap(color_order='red_white_green'):
         colors = ['#388e3c', '#ffffff', '#d32f2f']
     return LinearSegmentedColormap.from_list('custom_diverging', colors)
 
-def get_yearly_cmap():
-    # Paleta distinta (púrpura-blanco-naranja) para no mezclar la escala anual con la mensual/trimestral
-    colors = ['#7b3294', '#ffffff', '#e66101']
+def get_yearly_cmap(color_order='red_white_green'):
+    # Mismo espíritu rojo/verde que el mensual, pero en un tono más oscuro/saturado
+    # para que se distinga a simple vista sin mezclar las dos escalas.
+    if color_order == 'red_white_green':
+        colors = ['#7f0000', '#ffffff', '#0d3d1a']
+    else:
+        colors = ['#0d3d1a', '#ffffff', '#7f0000']
     return LinearSegmentedColormap.from_list('yearly_diverging', colors)
 
 def calculate_yearly_changes(daily_data, price_col):
@@ -372,11 +376,15 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
     # Columna extra con el cambio anual (mismo método last-vs-last, calculado sobre el precio diario)
     yearly_change = calculate_yearly_changes(daily_data, price_col)
     combined = pivot.copy()
+    n_period_cols = pivot.shape[1]
+    combined['__gap__'] = np.nan          # columna en blanco: separa visualmente meses/trimestres de "Año"
     combined['Año'] = yearly_change.reindex(pivot.index)
-    year_col_idx = pivot.shape[1]
+    gap_col_idx = n_period_cols
+    year_col_idx = n_period_cols + 1
 
     mask_main = np.zeros(combined.shape, dtype=bool)
-    mask_main[:, year_col_idx] = True  # ocultar la columna 'Año' en el heatmap principal
+    mask_main[:, gap_col_idx] = True      # ocultar la columna vacía en el heatmap principal
+    mask_main[:, year_col_idx] = True     # ocultar la columna 'Año' en el heatmap principal
 
     mask_year = np.ones(combined.shape, dtype=bool)
     mask_year[:, year_col_idx] = combined['Año'].isna().values  # mostrar solo donde hay dato anual
@@ -384,19 +392,19 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
     valid_year_vals = combined['Año'].dropna()
     max_abs_year = np.abs(valid_year_vals).max() if not valid_year_vals.empty else 1
 
-    fig, ax = plt.subplots(figsize=(13, max(6, len(pivot)*0.4)))
+    fig, ax = plt.subplots(figsize=(13.5, max(6, len(pivot)*0.4)))
     divider = make_axes_locatable(ax)
     cax1 = divider.append_axes("right", size="3%", pad=0.6)
     cax2 = divider.append_axes("right", size="3%", pad=0.9)
 
     sns.heatmap(combined, mask=mask_main, cmap=get_custom_cmap(color_order), annot=True, fmt=".1f",
-                center=0, linewidths=0.5, ax=ax, cbar_ax=cax1,
+                center=0, linewidths=0.5, linecolor='#0e1117', ax=ax, cbar_ax=cax1,
                 cbar_kws={'label': f'Cambio {period_label} (%)'})
-    sns.heatmap(combined, mask=mask_year, cmap=get_yearly_cmap(), annot=True, fmt=".1f",
-                center=0, vmin=-max_abs_year, vmax=max_abs_year, linewidths=0.5, ax=ax, cbar_ax=cax2,
-                cbar_kws={'label': 'Cambio Anual (%)'})
+    sns.heatmap(combined, mask=mask_year, cmap=get_yearly_cmap(color_order), annot=True, fmt=".1f",
+                center=0, vmin=-max_abs_year, vmax=max_abs_year, linewidths=0.5, linecolor='#0e1117',
+                ax=ax, cbar_ax=cax2, cbar_kws={'label': 'Cambio Anual (%)'})
 
-    ax.set_xticklabels([names[i-1] for i in pivot.columns] + ['Año'], rotation=45)
+    ax.set_xticklabels([names[i-1] for i in pivot.columns] + ['', 'Año'], rotation=45)
     ax.set_title(f"Heatmap {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
     for cax in (cax1, cax2):
@@ -448,22 +456,22 @@ def create_period_ranking(monthly_data, main, sec, third, analysis_period, perio
     pos = monthly_data.groupby(grp)[f'Cambio {period_label} (%)'].apply(lambda x: (x>0).sum())
     neg = monthly_data.groupby(grp)[f'Cambio {period_label} (%)'].apply(lambda x: (x<0).sum())
 
-    # Bucket extra: total de años positivos vs negativos (mismo cálculo last-vs-last que el heatmap)
+    # Bucket extra: total histórico de años positivos vs negativos (mismo cálculo last-vs-last que el heatmap)
     yearly_change = calculate_yearly_changes(daily_data, price_col).dropna()
     pos_years = int((yearly_change > 0).sum())
     neg_years = int((yearly_change < 0).sum())
 
-    all_names = names + ['Año']
-    pos_vals = list(pos) + [pos_years]
-    neg_vals = list(neg) + [neg_years]
+    x_months = np.arange(len(names))
+    x_year = len(names) + 1  # deja un hueco de 1 posición como separación real, no solo una línea
 
     fig, ax = plt.subplots(figsize=(11,6))
-    x = np.arange(len(all_names))
-    ax.bar(x - 0.2, pos_vals, 0.4, label='Positivos', color='#4caf50')
-    ax.bar(x + 0.2, neg_vals, 0.4, label='Negativos', color='#ef5350')
-    ax.axvline(len(names) - 0.5, color='white', ls=':', alpha=0.4)  # separa visualmente el bucket "Año"
-    ax.set_xticks(x)
-    ax.set_xticklabels(all_names, rotation=45)
+    ax.bar(x_months - 0.2, pos, 0.4, label='Positivos', color='#4caf50')
+    ax.bar(x_months + 0.2, neg, 0.4, label='Negativos', color='#ef5350')
+    ax.bar(x_year - 0.2, pos_years, 0.4, color='#4caf50')
+    ax.bar(x_year + 0.2, neg_years, 0.4, color='#ef5350')
+    ax.axvline((x_months[-1] + x_year) / 2, color='white', ls=':', alpha=0.4)
+    ax.set_xticks(list(x_months) + [x_year])
+    ax.set_xticklabels(names + ['Total Años\n(histórico)'], rotation=45)
     ax.legend()
     ax.set_title(f"Ranking {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
