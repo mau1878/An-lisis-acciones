@@ -66,12 +66,12 @@ def apply_dark_theme(ax):
         for text in legend.get_texts():
             text.set_color('white')
 
-def add_watermark(ax, fontsize=28, alpha=0.25):
+def add_watermark(ax, fontsize=22, alpha=0.12):
     ax.text(0.5, 0.5, "MTaurus - X: MTaurus_ok",
             fontsize=fontsize, color='white', alpha=alpha,
             ha='center', va='center', rotation=-42,
             transform=ax.transAxes, fontweight='bold', zorder=999,
-            path_effects=[pe.withStroke(linewidth=2, foreground='black', alpha=0.5)])
+            path_effects=[pe.withStroke(linewidth=1, foreground='black', alpha=0.3)])
 
 def get_custom_cmap(color_order='red_white_green'):
     if color_order == 'red_white_green':
