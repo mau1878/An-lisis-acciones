@@ -66,12 +66,13 @@ def apply_dark_theme(ax):
         for text in legend.get_texts():
             text.set_color('white')
 
-def add_watermark(ax, fontsize=22, alpha=0.12):
-    ax.text(0.5, 0.5, "MTaurus - X: MTaurus_ok",
-            fontsize=fontsize, color='white', alpha=alpha,
-            ha='center', va='center', rotation=-42,
-            transform=ax.transAxes, fontweight='bold', zorder=999,
-            path_effects=[pe.withStroke(linewidth=1, foreground='black', alpha=0.3)])
+def add_watermark(ax, fontsize=24, alpha=0.10, stroke=False):
+    kwargs = dict(fontsize=fontsize, color='white', alpha=alpha,
+                  ha='center', va='center', rotation=-42,
+                  transform=ax.transAxes, fontweight='bold', zorder=999)
+    if stroke:
+        kwargs['path_effects'] = [pe.withStroke(linewidth=1, foreground='black', alpha=0.3)]
+    ax.text(0.5, 0.5, "MTaurus - X: MTaurus_ok", **kwargs)
 
 def get_custom_cmap(color_order='red_white_green'):
     if color_order == 'red_white_green':
@@ -419,7 +420,7 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
         cax.tick_params(colors='white')
         cax.yaxis.label.set_color('white')
         cax.set_facecolor('#0e1117')
-    add_watermark(ax)
+    add_watermark(ax, fontsize=22, alpha=0.12, stroke=True)
     st.pyplot(fig)
 
 def create_average_changes_visualization(monthly_data, metric, main, sec, third, analysis_period, period_label, apply_ccl=False):
