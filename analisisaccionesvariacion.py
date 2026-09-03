@@ -407,6 +407,12 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
     ax.set_xticklabels([names[i-1] for i in pivot.columns] + ['', 'Año'], rotation=45)
     ax.set_title(f"Heatmap {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
     apply_dark_theme(ax)
+
+    # Repetir el año dentro de la columna en blanco, para no tener que mirar hasta la izquierda
+    for i, year in enumerate(combined.index):
+        ax.text(gap_col_idx + 0.5, i + 0.5, str(year), color='white', ha='center', va='center',
+                fontsize=9, fontweight='bold')
+
     for cax in (cax1, cax2):
         cax.tick_params(colors='white')
         cax.yaxis.label.set_color('white')
