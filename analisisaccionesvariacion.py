@@ -7,6 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib import patheffects as pe
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import requests
 from datetime import datetime
@@ -69,7 +70,8 @@ def add_watermark(ax, fontsize=28, alpha=0.25):
     ax.text(0.5, 0.5, "MTaurus - X: MTaurus_ok",
             fontsize=fontsize, color='white', alpha=alpha,
             ha='center', va='center', rotation=-42,
-            transform=ax.transAxes, fontweight='bold', zorder=999)
+            transform=ax.transAxes, fontweight='bold', zorder=999,
+            path_effects=[pe.withStroke(linewidth=2, foreground='black', alpha=0.5)])
 
 def get_custom_cmap(color_order='red_white_green'):
     if color_order == 'red_white_green':
