@@ -792,6 +792,20 @@ def main():
             df_daily = ratio_series.to_frame(name='Price')
             df_daily.index = pd.to_datetime(df_daily.index)
 
+            # ─── DEBUG TEMPORAL: sacar después de confirmar el bug ───
+            if apply_ccl and main_ticker.upper() == '^MERV':
+                st.warning("🔧 Debug temporal activo — ver el expander arriba de los gráficos")
+                with st.expander("🔧 Debug temporal: detalle dic-1999/ene-2000", expanded=True):
+                    ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo(
+                        pd.Timestamp('1999-11-01'), pd.Timestamp('2000-02-28')
+                    )
+                    st.write("YPFD.BA crudo (con session):")
+                    st.dataframe(ypfd_dbg.loc['1999-12-15':'2000-01-15'])
+                    st.write("YPF crudo (con session):")
+                    st.dataframe(ypf_dbg.loc['1999-12-15':'2000-01-15'])
+                    st.write("df_daily (Price ya con CCL aplicado) alrededor del empalme:")
+                    st.dataframe(df_daily.loc['1999-12-15':'2000-01-15'])
+
             df_period = df_daily.resample(freq).last()
             df_period[f'Cambio {per_label} (%)'] = df_period['Price'].pct_change() * 100
 
