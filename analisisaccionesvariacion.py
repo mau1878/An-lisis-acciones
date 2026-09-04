@@ -277,33 +277,24 @@ def extender_con_historico_merval(df, ticker, start_date):
 MERVAL_CCL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'merval_ccl_historico.csv')
 MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2000-01-03')  # desde acá manda el ratio YPFD.BA/YPF
 
-# YPFD.BA tuvo un split 10:1 el 12/12/2001 (pasó de 17,0 a 1,7 de un día para
-# el otro, sin que YPF -el ADR- se moviera). Antes de esa fecha 1 ADR YPF
-# equivale a 1 acción local; desde esa fecha, a 10. Usar siempre x10 (como
-# antes) distorsiona el ratio para cualquier fecha anterior al split.
-YPF_SPLIT_DATE = pd.Timestamp('2001-12-12')
-
 @st.cache_data(ttl="1d")
 def descargar_ypfd_ypf_crudo():
-    """Descarga YPFD.BA y YPF con precio CRUDO (sin ajustar por dividendos).
-    El ratio de CCL necesita esto: el ADR cobra dividendos en USD y la acción
-    local en ARS, así que sus historiales de ajuste no son comparables entre
-    sí y distorsionan el ratio si se usa Adj Close (verificado con datos
-    reales: en Convertibilidad el ratio debía dar ~1.0 y con Adj Close daba ~21).
-    Separado a propósito de descargar_datos_yfinance, que sí debe usar Adj Close
-    para analizar un ticker por sí solo.
+    """Descarga YPFD.BA y YPF con precio sin ajustar por DIVIDENDOS
+    (auto_adjust=False). El ratio de CCL necesita esto: el ADR cobra
+    dividendos en USD y la acción local en ARS, así que sus historiales de
+    ajuste por dividendos no son comparables entre sí y distorsionan el
+    ratio si se usa Adj Close (verificado con datos reales: en Convertibilidad
+    el ratio debía dar ~1.0 y con Adj Close daba ~21).
 
-    IMPORTANTE: siempre se pide desde un ancla fija (1996-01-01) HASTA HOY,
-    nunca con un end_date parametrizado. Empíricamente, el ajuste por split
-    que aplica Yahoo (incluso con auto_adjust=False) depende de que el rango
-    pedido llegue hasta la fecha actual -- si el rango termina antes de hoy,
-    devuelve los precios pre-split sin ajustar (ej. 3,61 en vez de 36,10 para
-    la misma fecha real). Pedir siempre hasta hoy y recortar después garantiza
-    que el ajuste sea el mismo sin importar qué ventana necesite el resto del código."""
+    Nota sobre splits: en yfinance 1.x, auto_adjust=False solo evita el
+    ajuste por dividendos -- el ajuste por SPLITS se aplica siempre, de forma
+    consistente en toda la serie histórica (verificado: da el mismo resultado
+    sin importar el rango pedido). Por eso el multiplicador ADR:acción local
+    es constante (x10) en calcular_ratio_ypfd_ypf, sin necesidad de detectar
+    fechas de split a mano."""
     try:
-        session = cffi_requests.Session(impersonate="chrome124")
-        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, session=session, auto_adjust=False)
-        ypf = yf.download('YPF', start='1996-01-01', progress=False, session=session, auto_adjust=False)
+        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, auto_adjust=False)
+        ypf = yf.download('YPF', start='1996-01-01', progress=False, auto_adjust=False)
 
         def get_close(d):
             if isinstance(d.columns, pd.MultiIndex):
@@ -323,9 +314,8 @@ def calcular_ratio_ypfd_ypf(start_date, end_date):
     combined = combined[combined.index >= pd.Timestamp(start_date)]
     if combined.empty:
         return pd.Series(dtype=float)
-    mult = pd.Series(1, index=combined.index)
-    mult[combined.index >= YPF_SPLIT_DATE] = 10
-    return (combined['YPFD'] * mult) / combined['YPF']
+    # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
+    return (combined['YPFD'] * 10) / combined['YPF']
 
 @st.cache_data
 def cargar_ccl_historico_merval():
@@ -807,10 +797,9 @@ def main():
                 with st.expander("🔧 Debug temporal: detalle dic-1999/ene-2000", expanded=True):
                     st.write(f"Versión de yfinance: {yf.__version__}")
                     ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo()
-                    st.write("YPFD.BA crudo (ancla fija 1996 hasta hoy):")
-                    st.dataframe(ypfd_dbg.loc['1999-12-15':'2000-01-15'])
-                    st.write("YPF crudo (ancla fija 1996 hasta hoy):")
-                    st.dataframe(ypf_dbg.loc['1999-12-15':'2000-01-15'])
+                    ratio_dbg = (ypfd_dbg * 10) / ypf_dbg
+                    st.write("Ratio YPFD.BA/YPF (x10 ya aplicado) alrededor del empalme:")
+                    st.dataframe(ratio_dbg.loc['1999-12-15':'2000-01-15'])
                     st.write("df_daily (Price ya con CCL aplicado) alrededor del empalme:")
                     st.dataframe(df_daily.loc['1999-12-15':'2000-01-15'])
 
