@@ -283,8 +283,8 @@ MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2000-01-03')  # desde acá manda el 
 # antes) distorsiona el ratio para cualquier fecha anterior al split.
 YPF_SPLIT_DATE = pd.Timestamp('2001-12-12')
 
-@st.cache_data
-def descargar_ypfd_ypf_crudo(end_date):
+@st.cache_data(ttl="1d")
+def descargar_ypfd_ypf_crudo():
     """Descarga YPFD.BA y YPF con precio CRUDO (sin ajustar por dividendos).
     El ratio de CCL necesita esto: el ADR cobra dividendos en USD y la acción
     local en ARS, así que sus historiales de ajuste no son comparables entre
@@ -293,17 +293,17 @@ def descargar_ypfd_ypf_crudo(end_date):
     Separado a propósito de descargar_datos_yfinance, que sí debe usar Adj Close
     para analizar un ticker por sí solo.
 
-    IMPORTANTE: siempre se pide desde un ancla fija (1996-01-01), nunca desde
-    una fecha de inicio variable. Yahoo aplica el ajuste por split de forma
-    RELATIVA al rango pedido -- si el rango no cruza el split del 12/12/2001,
-    devuelve el precio nominal de la época (ej. 36,10); si lo cruza, devuelve
-    todo retro-ajustado (ej. 3,61 para la misma fecha), incluso con
-    auto_adjust=False. Pedir siempre el mismo rango amplio garantiza que el
-    ajuste sea consistente sin importar qué ventana necesite el resto del código."""
+    IMPORTANTE: siempre se pide desde un ancla fija (1996-01-01) HASTA HOY,
+    nunca con un end_date parametrizado. Empíricamente, el ajuste por split
+    que aplica Yahoo (incluso con auto_adjust=False) depende de que el rango
+    pedido llegue hasta la fecha actual -- si el rango termina antes de hoy,
+    devuelve los precios pre-split sin ajustar (ej. 3,61 en vez de 36,10 para
+    la misma fecha real). Pedir siempre hasta hoy y recortar después garantiza
+    que el ajuste sea el mismo sin importar qué ventana necesite el resto del código."""
     try:
         session = cffi_requests.Session(impersonate="chrome124")
-        ypfd = yf.download('YPFD.BA', start='1996-01-01', end=end_date, progress=False, session=session, auto_adjust=False)
-        ypf = yf.download('YPF', start='1996-01-01', end=end_date, progress=False, session=session, auto_adjust=False)
+        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, session=session, auto_adjust=False)
+        ypf = yf.download('YPF', start='1996-01-01', progress=False, session=session, auto_adjust=False)
 
         def get_close(d):
             if isinstance(d.columns, pd.MultiIndex):
@@ -316,7 +316,7 @@ def descargar_ypfd_ypf_crudo(end_date):
         return pd.Series(dtype=float), pd.Series(dtype=float)
 
 def calcular_ratio_ypfd_ypf(start_date, end_date):
-    ypfd, ypf = descargar_ypfd_ypf_crudo(end_date)
+    ypfd, ypf = descargar_ypfd_ypf_crudo()
     if ypfd.empty or ypf.empty:
         return pd.Series(dtype=float)
     combined = pd.DataFrame({'YPFD': ypfd, 'YPF': ypf}).dropna()
@@ -805,10 +805,10 @@ def main():
             if apply_ccl and main_ticker.upper() == '^MERV':
                 st.warning("🔧 Debug temporal activo — ver el expander arriba de los gráficos")
                 with st.expander("🔧 Debug temporal: detalle dic-1999/ene-2000", expanded=True):
-                    ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo(pd.Timestamp('2000-02-28'))
-                    st.write("YPFD.BA crudo (con session, ancla fija 1996):")
+                    ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo()
+                    st.write("YPFD.BA crudo (con session, ancla fija 1996 hasta hoy):")
                     st.dataframe(ypfd_dbg.loc['1999-12-15':'2000-01-15'])
-                    st.write("YPF crudo (con session, ancla fija 1996):")
+                    st.write("YPF crudo (con session, ancla fija 1996 hasta hoy):")
                     st.dataframe(ypf_dbg.loc['1999-12-15':'2000-01-15'])
                     st.write("df_daily (Price ya con CCL aplicado) alrededor del empalme:")
                     st.dataframe(df_daily.loc['1999-12-15':'2000-01-15'])
