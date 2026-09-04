@@ -268,14 +268,17 @@ def extender_con_historico_merval(df, ticker, start_date):
         return hist_df
     return pd.concat([hist_df, df[~df.index.isin(hist_df.index)]]).sort_index()
 
-# ─── CCL HISTÓRICO PARA ^MERV (1988-2000) Y CORRECCIÓN DEL RATIO YPFD.BA/YPF ───
-# Tramo BCRA (Excel del usuario, "Merval_desde_el_88.xlsx", serie com_3501):
-#   4/4/1988 a 2/1/2000. A partir del 3/1/2000 el ratio YPFD.BA/YPF (yfinance)
-#   ya tiene datos reales y empalma casi perfecto contra el histórico BCRA
-#   (verificado con overlap real: <1% de diferencia).
+# ─── CCL HISTÓRICO PARA ^MERV (1988-2002) Y RATIO YPFD.BA/YPF ───
+# Tramo BCRA (Excel del usuario, "Merval_desde_el_88.xlsx"), con prioridad:
+#   - com_3501: 4/4/1988 a 11/7/2000
+#   - dolar_estadounidense (relleno): 12/7/2000 a 3/3/2002
+#   - com_3500 (dólar de referencia oficial): 4/3/2002 a 24/10/2002
+# El ratio YPFD.BA/YPF quedó descartado para esta ventana por diferir un poco
+# de lo esperable justo a la salida de la Convertibilidad; se usa recién
+# desde el 25/10/2002 en adelante.
 # Colocar el archivo en el repo en: data/merval_ccl_historico.csv
 MERVAL_CCL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'merval_ccl_historico.csv')
-MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2000-01-03')  # desde acá manda el ratio YPFD.BA/YPF
+MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2002-10-25')  # desde acá manda el ratio YPFD.BA/YPF
 
 @st.cache_data(ttl="1d")
 def descargar_ypfd_ypf_crudo():
@@ -791,17 +794,17 @@ def main():
             df_daily = ratio_series.to_frame(name='Price')
             df_daily.index = pd.to_datetime(df_daily.index)
 
-            # ─── DEBUG TEMPORAL: sacar después de confirmar el bug ───
+            # ─── DEBUG TEMPORAL: sacar después de confirmar el nuevo empalme (25/10/2002) ───
             if apply_ccl and main_ticker.upper() == '^MERV':
                 st.warning("🔧 Debug temporal activo — ver el expander arriba de los gráficos")
-                with st.expander("🔧 Debug temporal: detalle dic-1999/ene-2000", expanded=True):
+                with st.expander("🔧 Debug temporal: detalle oct-2002 (nuevo punto de empalme)", expanded=True):
                     st.write(f"Versión de yfinance: {yf.__version__}")
                     ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo()
                     ratio_dbg = (ypfd_dbg * 10) / ypf_dbg
-                    st.write("Ratio YPFD.BA/YPF (x10 ya aplicado) alrededor del empalme:")
-                    st.dataframe(ratio_dbg.loc['1999-12-15':'2000-01-15'])
-                    st.write("df_daily (Price ya con CCL aplicado) alrededor del empalme:")
-                    st.dataframe(df_daily.loc['1999-12-15':'2000-01-15'])
+                    st.write("Ratio YPFD.BA/YPF (x10 ya aplicado) alrededor del nuevo empalme:")
+                    st.dataframe(ratio_dbg.loc['2002-10-15':'2002-11-10'])
+                    st.write("df_daily (Price ya con CCL aplicado) alrededor del nuevo empalme:")
+                    st.dataframe(df_daily.loc['2002-10-15':'2002-11-10'])
 
             df_period = df_daily.resample(freq).last()
             df_period[f'Cambio {per_label} (%)'] = df_period['Price'].pct_change() * 100
