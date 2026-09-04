@@ -302,8 +302,8 @@ def descargar_ypfd_ypf_crudo():
     que el ajuste sea el mismo sin importar qué ventana necesite el resto del código."""
     try:
         session = cffi_requests.Session(impersonate="chrome124")
-        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, session=session, auto_adjust=False)
-        ypf = yf.download('YPF', start='1996-01-01', progress=False, session=session, auto_adjust=False)
+        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, auto_adjust=False)
+        ypf = yf.download('YPF', start='1996-01-01', progress=False, auto_adjust=False)
 
         def get_close(d):
             if isinstance(d.columns, pd.MultiIndex):
