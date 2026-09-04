@@ -302,8 +302,8 @@ def descargar_ypfd_ypf_crudo():
     que el ajuste sea el mismo sin importar qué ventana necesite el resto del código."""
     try:
         session = cffi_requests.Session(impersonate="chrome124")
-        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, auto_adjust=False)
-        ypf = yf.download('YPF', start='1996-01-01', progress=False, auto_adjust=False)
+        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, session=session, auto_adjust=False)
+        ypf = yf.download('YPF', start='1996-01-01', progress=False, session=session, auto_adjust=False)
 
         def get_close(d):
             if isinstance(d.columns, pd.MultiIndex):
@@ -805,10 +805,11 @@ def main():
             if apply_ccl and main_ticker.upper() == '^MERV':
                 st.warning("🔧 Debug temporal activo — ver el expander arriba de los gráficos")
                 with st.expander("🔧 Debug temporal: detalle dic-1999/ene-2000", expanded=True):
+                    st.write(f"Versión de yfinance: {yf.__version__}")
                     ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo()
-                    st.write("YPFD.BA crudo (con session, ancla fija 1996 hasta hoy):")
+                    st.write("YPFD.BA crudo (ancla fija 1996 hasta hoy):")
                     st.dataframe(ypfd_dbg.loc['1999-12-15':'2000-01-15'])
-                    st.write("YPF crudo (con session, ancla fija 1996 hasta hoy):")
+                    st.write("YPF crudo (ancla fija 1996 hasta hoy):")
                     st.dataframe(ypf_dbg.loc['1999-12-15':'2000-01-15'])
                     st.write("df_daily (Price ya con CCL aplicado) alrededor del empalme:")
                     st.dataframe(df_daily.loc['1999-12-15':'2000-01-15'])
