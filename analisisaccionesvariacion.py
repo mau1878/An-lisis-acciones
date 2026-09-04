@@ -268,6 +268,26 @@ def extender_con_historico_merval(df, ticker, start_date):
         return hist_df
     return pd.concat([hist_df, df[~df.index.isin(hist_df.index)]]).sort_index()
 
+# ─── CCL HISTÓRICO PARA ^MERV (1988-2002) ───
+# Empalme de dos series (Excel del usuario, "Merval_desde_el_88.xlsx"):
+#   - com_3501 (BCRA): 4/4/1988 a 11/7/2000
+#   - dolar_estadounidense (BCRA): 12/7/2000 a 3/3/2002
+# A partir del 4/3/2002 se usa el ratio YPFD.BA/YPF que ya tiene el script
+# (coincide con lo que reportó el usuario: antes de esa fecha ese ratio no es confiable).
+# Colocar el archivo en el repo en: data/merval_ccl_historico.csv
+MERVAL_CCL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'merval_ccl_historico.csv')
+MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2002-03-04')  # desde acá manda el ratio YPFD.BA/YPF
+
+@st.cache_data
+def cargar_ccl_historico_merval():
+    try:
+        hist = pd.read_csv(MERVAL_CCL_HISTORICO_PATH, parse_dates=['Date'])
+        hist = hist.sort_values('Date').drop_duplicates('Date').set_index('Date')
+        return hist['TipoCambio']
+    except Exception as e:
+        logger.error(f"Error cargando CCL histórico Merval: {e}")
+        return pd.Series(dtype=float)
+
 def fetch_data(tickers, start_date, end_date, data_source):
     data = {}
     for ticker in tickers:
@@ -307,7 +327,25 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
 
     if apply_ccl_ratio:
         if data_source == 'yfinance':
-            if 'YPFD.BA' in data and 'YPF' in data:
+            if main_ticker.upper() == '^MERV':
+                ratio = pd.Series(index=result.index, dtype=float)
+
+                # Tramo histórico (1988 - 3/3/2002): com_3501 / dolar_estadounidense
+                hist_ccl = cargar_ccl_historico_merval()
+                if not hist_ccl.empty:
+                    idx_hist = result.index[result.index < MERVAL_CCL_HISTORICO_CUTOFF]
+                    ratio.loc[idx_hist] = hist_ccl.reindex(idx_hist)
+
+                # Tramo moderno (desde 4/3/2002): ratio YPFD.BA/YPF ya existente
+                if 'YPFD.BA' in data and 'YPF' in data:
+                    ypfd = data['YPFD.BA']['YPFD_BA']
+                    ypf = data['YPF']['YPF']
+                    ratio_ypf = (ypfd * 10) / ypf  # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
+                    idx_moderno = result.index[result.index >= MERVAL_CCL_HISTORICO_CUTOFF]
+                    ratio.loc[idx_moderno] = ratio_ypf.reindex(idx_moderno)
+
+                result = result / ratio
+            elif 'YPFD.BA' in data and 'YPF' in data:
                 ypfd = data['YPFD.BA']['YPFD_BA']
                 ypf = data['YPF']['YPF']
                 # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
