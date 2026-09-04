@@ -268,15 +268,55 @@ def extender_con_historico_merval(df, ticker, start_date):
         return hist_df
     return pd.concat([hist_df, df[~df.index.isin(hist_df.index)]]).sort_index()
 
-# ─── CCL HISTÓRICO PARA ^MERV (1988-2002) ───
-# Empalme de dos series (Excel del usuario, "Merval_desde_el_88.xlsx"):
-#   - com_3501 (BCRA): 4/4/1988 a 11/7/2000
-#   - dolar_estadounidense (BCRA): 12/7/2000 a 3/3/2002
-# A partir del 4/3/2002 se usa el ratio YPFD.BA/YPF que ya tiene el script
-# (coincide con lo que reportó el usuario: antes de esa fecha ese ratio no es confiable).
+# ─── CCL HISTÓRICO PARA ^MERV (1988-2000) Y CORRECCIÓN DEL RATIO YPFD.BA/YPF ───
+# Tramo BCRA (Excel del usuario, "Merval_desde_el_88.xlsx", serie com_3501):
+#   4/4/1988 a 2/1/2000. A partir del 3/1/2000 el ratio YPFD.BA/YPF (yfinance)
+#   ya tiene datos reales y empalma casi perfecto contra el histórico BCRA
+#   (verificado con overlap real: <1% de diferencia).
 # Colocar el archivo en el repo en: data/merval_ccl_historico.csv
 MERVAL_CCL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'merval_ccl_historico.csv')
-MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2002-03-04')  # desde acá manda el ratio YPFD.BA/YPF
+MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2000-01-03')  # desde acá manda el ratio YPFD.BA/YPF
+
+# YPFD.BA tuvo un split 10:1 el 12/12/2001 (pasó de 17,0 a 1,7 de un día para
+# el otro, sin que YPF -el ADR- se moviera). Antes de esa fecha 1 ADR YPF
+# equivale a 1 acción local; desde esa fecha, a 10. Usar siempre x10 (como
+# antes) distorsiona el ratio para cualquier fecha anterior al split.
+YPF_SPLIT_DATE = pd.Timestamp('2001-12-12')
+
+@st.cache_data
+def descargar_ypfd_ypf_crudo(start_date, end_date):
+    """Descarga YPFD.BA y YPF con precio CRUDO (sin ajustar por dividendos).
+    El ratio de CCL necesita esto: el ADR cobra dividendos en USD y la acción
+    local en ARS, así que sus historiales de ajuste no son comparables entre
+    sí y distorsionan el ratio si se usa Adj Close (verificado con datos
+    reales: en Convertibilidad el ratio debía dar ~1.0 y con Adj Close daba ~21).
+    Separado a propósito de descargar_datos_yfinance, que sí debe usar Adj Close
+    para analizar un ticker por sí solo."""
+    try:
+        session = cffi_requests.Session(impersonate="chrome124")
+        ypfd = yf.download('YPFD.BA', start=start_date, end=end_date, progress=False, session=session, auto_adjust=False)
+        ypf = yf.download('YPF', start=start_date, end=end_date, progress=False, session=session, auto_adjust=False)
+
+        def get_close(d):
+            if isinstance(d.columns, pd.MultiIndex):
+                d = d.droplevel(1, axis=1)
+            return d['Close'] if 'Close' in d.columns else pd.Series(dtype=float)
+
+        return get_close(ypfd).dropna(), get_close(ypf).dropna()
+    except Exception as e:
+        logger.error(f"Error descargando YPFD.BA/YPF crudo: {e}")
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+
+def calcular_ratio_ypfd_ypf(start_date, end_date):
+    ypfd, ypf = descargar_ypfd_ypf_crudo(start_date, end_date)
+    if ypfd.empty or ypf.empty:
+        return pd.Series(dtype=float)
+    combined = pd.DataFrame({'YPFD': ypfd, 'YPF': ypf}).dropna()
+    if combined.empty:
+        return pd.Series(dtype=float)
+    mult = pd.Series(1, index=combined.index)
+    mult[combined.index >= YPF_SPLIT_DATE] = 10
+    return (combined['YPFD'] * mult) / combined['YPF']
 
 @st.cache_data
 def cargar_ccl_historico_merval():
@@ -330,27 +370,24 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
             if main_ticker.upper() == '^MERV':
                 ratio = pd.Series(index=result.index, dtype=float)
 
-                # Tramo histórico (1988 - 3/3/2002): com_3501 / dolar_estadounidense
+                # Tramo histórico (1988 - 2/1/2000): com_3501 (BCRA)
                 hist_ccl = cargar_ccl_historico_merval()
                 if not hist_ccl.empty:
                     idx_hist = result.index[result.index < MERVAL_CCL_HISTORICO_CUTOFF]
                     ratio.loc[idx_hist] = hist_ccl.reindex(idx_hist)
 
-                # Tramo moderno (desde 4/3/2002): ratio YPFD.BA/YPF ya existente
-                if 'YPFD.BA' in data and 'YPF' in data:
-                    ypfd = data['YPFD.BA']['YPFD_BA']
-                    ypf = data['YPF']['YPF']
-                    ratio_ypf = (ypfd * 10) / ypf  # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
-                    idx_moderno = result.index[result.index >= MERVAL_CCL_HISTORICO_CUTOFF]
-                    ratio.loc[idx_moderno] = ratio_ypf.reindex(idx_moderno)
+                # Tramo moderno (desde 3/1/2000): ratio YPFD.BA/YPF crudo, corregido por el split
+                idx_moderno = result.index[result.index >= MERVAL_CCL_HISTORICO_CUTOFF]
+                if len(idx_moderno) > 0:
+                    ratio_ypf = calcular_ratio_ypfd_ypf(idx_moderno.min(), idx_moderno.max())
+                    if not ratio_ypf.empty:
+                        ratio.loc[idx_moderno] = ratio_ypf.reindex(idx_moderno)
 
                 result = result / ratio
             elif 'YPFD.BA' in data and 'YPF' in data:
-                ypfd = data['YPFD.BA']['YPFD_BA']
-                ypf = data['YPF']['YPF']
-                # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
-                ratio = (ypfd * 10) / ypf
-                result = result / ratio
+                ratio_ypf = calcular_ratio_ypfd_ypf(result.index.min(), result.index.max())
+                if not ratio_ypf.empty:
+                    result = result / ratio_ypf.reindex(result.index)
         else:
             if 'GD30' in data and 'GD30C' in data:
                 ratio = data['GD30']['GD30'] / data['GD30C']['GD30C']
