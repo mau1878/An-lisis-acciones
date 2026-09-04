@@ -7,11 +7,11 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib.colors import LinearSegmentedColormap
-from matplotlib import patheffects as pe
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import requests
 from datetime import datetime
 import logging
+import os
 import urllib3
 from curl_cffi import requests as cffi_requests
 
@@ -66,13 +66,11 @@ def apply_dark_theme(ax):
         for text in legend.get_texts():
             text.set_color('white')
 
-def add_watermark(ax, fontsize=24, alpha=0.10, stroke=False):
-    kwargs = dict(fontsize=fontsize, color='white', alpha=alpha,
-                  ha='center', va='center', rotation=-42,
-                  transform=ax.transAxes, fontweight='bold', zorder=999)
-    if stroke:
-        kwargs['path_effects'] = [pe.withStroke(linewidth=1, foreground='black', alpha=0.3)]
-    ax.text(0.5, 0.5, "MTaurus - X: MTaurus_ok", **kwargs)
+def add_watermark(ax, fontsize=28, alpha=0.25):
+    ax.text(0.5, 0.5, "MTaurus - X: MTaurus_ok",
+            fontsize=fontsize, color='white', alpha=alpha,
+            ha='center', va='center', rotation=-42,
+            transform=ax.transAxes, fontweight='bold', zorder=999)
 
 def get_custom_cmap(color_order='red_white_green'):
     if color_order == 'red_white_green':
@@ -227,6 +225,49 @@ def descargar_datos_byma(ticker, start_date, end_date):
         logger.error(f"Error ByMA {ticker}: {e}")
         return pd.DataFrame()
 
+# ─── HISTÓRICO EXTENDIDO PARA ^MERV (Stooq, 1988-1996) ───
+# yfinance solo tiene ^MERV desde el 8/10/1996. Este archivo (Stooq, ticker ^MRV)
+# completa el tramo 1988-04-04 a 1996-10-07 (día calendario justo anterior al
+# arranque de yfinance, sin superposición). Colocar el archivo en el repo en:
+#   data/mrv_historico.txt
+MERVAL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'mrv_historico.txt')
+MERVAL_HISTORICO_CUTOFF = pd.Timestamp('1996-10-08')  # primer día con datos de yfinance
+
+@st.cache_data
+def cargar_historico_merval_stooq():
+    try:
+        hist = pd.read_csv(MERVAL_HISTORICO_PATH)
+        hist['Date'] = pd.to_datetime(hist['<DATE>'], format='%Y%m%d')
+        hist = hist[hist['Date'] < MERVAL_HISTORICO_CUTOFF]
+        hist = hist[['Date', '<CLOSE>']].sort_values('Date').drop_duplicates('Date')
+        return hist.set_index('Date')['<CLOSE>']
+    except Exception as e:
+        logger.error(f"Error cargando histórico Merval (Stooq): {e}")
+        return pd.Series(dtype=float)
+
+def extender_con_historico_merval(df, ticker, start_date):
+    """Si el ticker es ^MERV y el usuario pidió datos desde antes del 8/10/1996,
+    completa 1988-1996 con el histórico de Stooq (^MRV)."""
+    if ticker.upper() != '^MERV':
+        return df
+    start_ts = pd.Timestamp(start_date)
+    if start_ts >= MERVAL_HISTORICO_CUTOFF:
+        return df
+
+    hist = cargar_historico_merval_stooq()
+    if hist.empty:
+        return df
+    hist = hist[hist.index >= start_ts]
+    if hist.empty:
+        return df
+
+    var_name = ticker.replace('.', '_')
+    hist_df = hist.to_frame(name=var_name)
+
+    if df.empty:
+        return hist_df
+    return pd.concat([hist_df, df[~df.index.isin(hist_df.index)]]).sort_index()
+
 def fetch_data(tickers, start_date, end_date, data_source):
     data = {}
     for ticker in tickers:
@@ -241,6 +282,9 @@ def fetch_data(tickers, start_date, end_date, data_source):
             df = descargar_datos_byma(ticker, start_date, end_date)
         else:
             df = pd.DataFrame()
+
+        df = extender_con_historico_merval(df, ticker, start_date)
+
         if not df.empty:
             data[ticker] = df
     return data
@@ -420,7 +464,7 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
         cax.tick_params(colors='white')
         cax.yaxis.label.set_color('white')
         cax.set_facecolor('#0e1117')
-    add_watermark(ax, fontsize=22, alpha=0.12, stroke=True)
+    add_watermark(ax)
     st.pyplot(fig)
 
 def create_average_changes_visualization(monthly_data, metric, main, sec, third, analysis_period, period_label, apply_ccl=False):
