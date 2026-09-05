@@ -6,7 +6,7 @@ import plotly.express as px
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import norm
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import requests
 from datetime import datetime
@@ -514,8 +514,21 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
     mask_year = np.ones(combined.shape, dtype=bool)
     mask_year[:, year_col_idx] = combined['Año'].isna().values  # mostrar solo donde hay dato anual
 
+    valid_period_vals = pivot.values[~np.isnan(pivot.values)]
+    if valid_period_vals.size > 0:
+        period_vmin = min(-100, valid_period_vals.min())
+        period_vmax = max(valid_period_vals.max(), 1)
+    else:
+        period_vmin, period_vmax = -100, 100
+    period_norm = TwoSlopeNorm(vmin=period_vmin, vcenter=0, vmax=period_vmax)
+
     valid_year_vals = combined['Año'].dropna()
-    max_abs_year = np.abs(valid_year_vals).max() if not valid_year_vals.empty else 1
+    if not valid_year_vals.empty:
+        year_vmin = min(-100, valid_year_vals.min())
+        year_vmax = max(valid_year_vals.max(), 1)
+    else:
+        year_vmin, year_vmax = -100, 100
+    year_norm = TwoSlopeNorm(vmin=year_vmin, vcenter=0, vmax=year_vmax)
 
     fig, ax = plt.subplots(figsize=(13.5, max(6, len(pivot)*0.4)))
     divider = make_axes_locatable(ax)
@@ -523,10 +536,10 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
     cax2 = divider.append_axes("right", size="3%", pad=0.9)
 
     sns.heatmap(combined, mask=mask_main, cmap=get_custom_cmap(color_order), annot=True, fmt=".1f",
-                center=0, linewidths=0.5, linecolor='#0e1117', ax=ax, cbar_ax=cax1,
+                norm=period_norm, linewidths=0.5, linecolor='#0e1117', ax=ax, cbar_ax=cax1,
                 cbar_kws={'label': f'Cambio {period_label} (%)'})
     sns.heatmap(combined, mask=mask_year, cmap=get_yearly_cmap(color_order), annot=True, fmt=".1f",
-                center=0, vmin=-max_abs_year, vmax=max_abs_year, linewidths=0.5, linecolor='#0e1117',
+                norm=year_norm, linewidths=0.5, linecolor='#0e1117',
                 ax=ax, cbar_ax=cax2, cbar_kws={'label': 'Cambio Anual (%)'})
 
     ax.set_xticklabels([names[i-1] for i in pivot.columns] + ['', 'Año'], rotation=45)
