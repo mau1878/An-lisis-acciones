@@ -131,7 +131,25 @@ def descargar_datos_yfinance(ticker, start, end):
     except Exception as e:
         logger.error(f"Error yfinance {ticker}: {e}")
         return pd.DataFrame()
-
+def descargar_datos_stooq(ticker, start_date, end_date):
+    try:
+        # Stooq usa sufijos propios: EEUU suele ir sin sufijo o con .us, índices con ^
+        symbol = ticker.lower()
+        url = (f"https://stooq.com/q/d/l/?s={symbol}"
+               f"&d1={start_date.strftime('%Y%m%d')}&d2={end_date.strftime('%Y%m%d')}&i=d")
+        df = pd.read_csv(url)
+        if df.empty or 'Date' not in df.columns or 'Close' not in df.columns:
+            logger.warning(f"No datos para {ticker} en Stooq")
+            return pd.DataFrame()
+        df['Date'] = pd.to_datetime(df['Date'])
+        var_name = ticker.replace('.', '_')
+        df = df[['Date', 'Close']].rename(columns={'Close': var_name})
+        df = ajustar_precios_por_splits(df, ticker)
+        df = df.set_index('Date')
+        return df
+    except Exception as e:
+        logger.error(f"Error Stooq {ticker}: {e}")
+        return pd.DataFrame()
 def descargar_datos_analisistecnico(ticker, start_date, end_date):
     try:
         from_timestamp = int(datetime.combine(start_date, datetime.min.time()).timestamp())
@@ -343,6 +361,8 @@ def fetch_data(tickers, start_date, end_date, data_source):
             df = descargar_datos_iol(ticker, start_date, end_date)
         elif data_source == 'byma':
             df = descargar_datos_byma(ticker, start_date, end_date)
+        elif data_source == 'stooq':
+            df = descargar_datos_stooq(ticker, start_date, end_date)
         else:
             df = pd.DataFrame()
 
@@ -702,12 +722,9 @@ def main():
 
     data_src = st.selectbox(
         "Fuente de datos",
-        options=['yfinance', 'analisistecnico', 'iol', 'byma'],
-        help="Elegí de dónde bajar los precios históricos.\n\n"
-             "- yfinance: datos globales (Yahoo Finance), incluye muchos tickers argentinos\n"
-             "- analisistecnico / iol / byma: fuentes argentinas específicas (pueden tener más precisión local pero dependen de cookies/sesiones)"
-    )
-
+        options=['yfinance', 'analisistecnico', 'iol', 'byma', 'stooq'],
+        help="...\n\n- stooq: histórico gratuito vía CSV, buena cobertura de EEUU/índices globales; cobertura de BYMA/tickers argentinos limitada o nula"
+)
     apply_ccl = st.checkbox(
         "Aplicar ratio CCL",
         value=False,
