@@ -375,8 +375,22 @@ def cargar_ccl_historico_merval():
     except Exception as e:
         logger.error(f"Error cargando CCL histórico Merval: {e}")
         return pd.Series(dtype=float)
-
-def fetch_data(tickers, start_date, end_date, data_source):
+def parse_csv_manual_stooq(file, ticker, start_date, end_date):
+    try:
+        df = pd.read_csv(file)
+        if 'Date' not in df.columns or 'Close' not in df.columns:
+            logger.warning(f"CSV manual de {ticker}: faltan columnas Date/Close")
+            return pd.DataFrame()
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df[(df['Date'] >= pd.Timestamp(start_date)) & (df['Date'] <= pd.Timestamp(end_date))]
+        var_name = ticker.replace('.', '_')
+        df = df[['Date', 'Close']].rename(columns={'Close': var_name})
+        df = ajustar_precios_por_splits(df, ticker)
+        return df.set_index('Date')
+    except Exception as e:
+        logger.error(f"Error parseando CSV manual de {ticker}: {e}")
+        return pd.DataFrame()
+def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=None):
     data = {}
     for ticker in tickers:
         ticker = ticker.upper()
@@ -390,11 +404,12 @@ def fetch_data(tickers, start_date, end_date, data_source):
             df = descargar_datos_byma(ticker, start_date, end_date)
         elif data_source == 'stooq':
             df = descargar_datos_stooq(ticker, start_date, end_date)
+        elif data_source == 'stooq_manual':
+            file = (stooq_manual_files or {}).get(ticker)
+            df = parse_csv_manual_stooq(file, ticker, start_date, end_date) if file else pd.DataFrame()
         else:
             df = pd.DataFrame()
-
         df = extender_con_historico_merval(df, ticker, start_date)
-
         if not df.empty:
             data[ticker] = df
     return data
@@ -748,9 +763,10 @@ def main():
     st.markdown("Seguinos en [X → @MTaurus_ok](https://x.com/MTaurus_ok)")
 
     data_src = st.selectbox(
-        "Fuente de datos",
-        options=['yfinance', 'analisistecnico', 'iol', 'byma', 'stooq'],
-        help="...\n\n- stooq: histórico gratuito vía CSV, buena cobertura de EEUU/índices globales; cobertura de BYMA/tickers argentinos limitada o nula"
+    "Fuente de datos",
+    options=['yfinance', 'analisistecnico', 'iol', 'byma', 'stooq', 'stooq_manual'],
+    help="...\n\n- stooq: automático vía cookies cacheadas (ver stooq_cookies.json)\n"
+         "- stooq_manual: subís vos el CSV descargado a mano desde stooq.com/q/d/?s=TICKER"
 )
     apply_ccl = st.checkbox(
         "Aplicar ratio CCL",
@@ -836,10 +852,17 @@ def main():
     tickers_set = {t for t in [main_ticker, sec_ticker, third_ticker] if t}
     if apply_ccl:
         tickers_set |= {'YPFD.BA', 'YPF'} if data_src == 'yfinance' else {'GD30', 'GD30C'}
-
+    stooq_manual_files = {}
+    if data_src == 'stooq_manual':
+        st.info("Bajá el CSV de cada ticker desde stooq.com/q/d/?s=TICKER (botón "
+                "'Download data in csv file...') y subilo acá.")
+        for t in sorted(tickers_set):
+            stooq_manual_files[t] = st.file_uploader(f"CSV de Stooq — {t}", type="csv", key=f"stooq_csv_{t}")
+    
     if st.button("Analizar", type="primary") and main_ticker:
         with st.spinner("Cargando datos..."):
-            raw_data = fetch_data(tickers_set, start_dt, end_dt, data_src)
+            raw_data = fetch_data(tickers_set, start_dt, end_dt, data_src, stooq_manual_files)
+
             if not raw_data:
                 st.error("No se obtuvieron datos.")
                 return
