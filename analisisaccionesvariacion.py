@@ -16,7 +16,7 @@ import urllib3
 from curl_cffi import requests as cffi_requests
 import json
 from pathlib import Path
-
+import io
 
 STOOQ_COOKIES_FILE = Path("stooq_cookies.json")
 # Logging
