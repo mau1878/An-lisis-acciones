@@ -14,7 +14,11 @@ import logging
 import os
 import urllib3
 from curl_cffi import requests as cffi_requests
+import json
+from pathlib import Path
 
+
+STOOQ_COOKIES_FILE = Path("stooq_cookies.json")
 # Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -131,22 +135,45 @@ def descargar_datos_yfinance(ticker, start, end):
     except Exception as e:
         logger.error(f"Error yfinance {ticker}: {e}")
         return pd.DataFrame()
+def cargar_cookies_stooq():
+    if not STOOQ_COOKIES_FILE.exists():
+        return {}
+    data = json.loads(STOOQ_COOKIES_FILE.read_text(encoding="utf-8"))
+    return {c["name"]: c["value"] for c in data.get("cookies", [])
+            if "stooq.com" in c.get("domain", "")}
+
+
 def descargar_datos_stooq(ticker, start_date, end_date):
+    cookies = cargar_cookies_stooq()
+    if not cookies:
+        logger.warning("No hay cookies de Stooq cacheadas — correr "
+                        "refrescar_cookies_stooq.py primero")
+        return pd.DataFrame()
     try:
-        # Stooq usa sufijos propios: EEUU suele ir sin sufijo o con .us, índices con ^
         symbol = ticker.lower()
-        url = (f"https://stooq.com/q/d/l/?s={symbol}"
-               f"&d1={start_date.strftime('%Y%m%d')}&d2={end_date.strftime('%Y%m%d')}&i=d")
-        df = pd.read_csv(url)
-        if df.empty or 'Date' not in df.columns or 'Close' not in df.columns:
-            logger.warning(f"No datos para {ticker} en Stooq")
+        params = {
+            's': symbol,
+            'd1': start_date.strftime('%Y%m%d'),
+            'd2': end_date.strftime('%Y%m%d'),
+            'i': 'd',
+        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                  'Chrome/124.0.0.0 Safari/537.36'}
+        resp = requests.get('https://stooq.com/q/d/l/', params=params,
+                             headers=headers, cookies=cookies, timeout=15)
+        if resp.status_code != 200 or not resp.text.startswith('Date'):
+            logger.warning(f"Stooq {ticker}: respuesta inesperada "
+                            f"(status {resp.status_code}) — cookies vencidas o rate limit")
+            return pd.DataFrame()
+        df = pd.read_csv(io.StringIO(resp.text))
+        if df.empty or 'Close' not in df.columns:
             return pd.DataFrame()
         df['Date'] = pd.to_datetime(df['Date'])
         var_name = ticker.replace('.', '_')
         df = df[['Date', 'Close']].rename(columns={'Close': var_name})
         df = ajustar_precios_por_splits(df, ticker)
-        df = df.set_index('Date')
-        return df
+        return df.set_index('Date')
     except Exception as e:
         logger.error(f"Error Stooq {ticker}: {e}")
         return pd.DataFrame()
