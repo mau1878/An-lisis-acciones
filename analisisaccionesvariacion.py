@@ -390,11 +390,38 @@ def parse_csv_manual_stooq(file, ticker, start_date, end_date):
     except Exception as e:
         logger.error(f"Error parseando CSV manual de {ticker}: {e}")
         return pd.DataFrame()
-def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=None):
+def parse_stooq_txt(file, start_date=None, end_date=None):
+    """Parsea el formato de descarga masiva de Stooq: columnas
+    <TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>.
+    El ticker se lee del propio archivo (columna <TICKER>), no hace falta
+    tipearlo a mano. Devuelve (ticker, DataFrame) o (None, DataFrame vacío)
+    si el archivo no tiene el formato esperado."""
+    try:
+        df = pd.read_csv(file)
+        df.columns = [c.strip('<>').upper() for c in df.columns]
+        if not {'TICKER', 'DATE', 'CLOSE'}.issubset(df.columns):
+            logger.warning("Archivo Stooq TXT: faltan columnas <TICKER>/<DATE>/<CLOSE>")
+            return None, pd.DataFrame()
+        ticker = str(df['TICKER'].iloc[0]).upper()
+        df['Date'] = pd.to_datetime(df['DATE'].astype(str), format='%Y%m%d')
+        df = df.sort_values('Date').drop_duplicates('Date')
+        var_name = ticker.replace('.', '_')
+        out = df[['Date', 'CLOSE']].rename(columns={'CLOSE': var_name})
+        out = ajustar_precios_por_splits(out, ticker)
+        return ticker, out.set_index('Date')
+    except Exception as e:
+        logger.error(f"Error parseando TXT Stooq: {e}")
+        return None, pd.DataFrame()
+
+def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=None, preloaded_data=None):
     data = {}
+    preloaded_data = preloaded_data or {}
     for ticker in tickers:
         ticker = ticker.upper()
-        if data_source == 'yfinance':
+        if ticker in preloaded_data:
+            df = preloaded_data[ticker]
+            df = df[(df.index >= pd.Timestamp(start_date)) & (df.index <= pd.Timestamp(end_date))]
+        elif data_source == 'yfinance':
             df = descargar_datos_yfinance(ticker, start_date, end_date)
         elif data_source == 'analisistecnico':
             df = descargar_datos_analisistecnico(ticker, start_date, end_date)
@@ -764,43 +791,76 @@ def main():
 
     data_src = st.selectbox(
     "Fuente de datos",
-    options=['yfinance', 'analisistecnico', 'iol', 'byma', 'stooq', 'stooq_manual'],
+    options=['yfinance', 'analisistecnico', 'iol', 'byma', 'stooq', 'stooq_manual', 'stooq_txt'],
     help="...\n\n- stooq: automático vía cookies cacheadas (ver stooq_cookies.json)\n"
-         "- stooq_manual: subís vos el CSV descargado a mano desde stooq.com/q/d/?s=TICKER"
+         "- stooq_manual: subís vos el CSV descargado a mano desde stooq.com/q/d/?s=TICKER\n"
+         "- stooq_txt: subís el .txt de descarga masiva de Stooq (columnas <TICKER><PER><DATE>...<CLOSE>...); "
+         "el ticker se detecta solo del archivo, no hace falta escribirlo"
 )
     apply_ccl = st.checkbox(
         "Aplicar ratio CCL",
         value=False,
+        disabled=(data_src == 'stooq_txt'),
         help="Marca esta opción si querés 'dolarizar' el ticker principal dividiendo su precio por el dólar CCL.\n\n"
              "- Con yfinance: usa YPFD.BA / YPF\n"
              "- Con otras fuentes: usa GD30 / GD30C\n\n"
-             "Muy útil para ver la performance en dólares CCL y comparar con activos en el exterior."
+             "Muy útil para ver la performance en dólares CCL y comparar con activos en el exterior.\n\n"
+             + ("No disponible con archivos Stooq TXT: si querés dolarizar, subí el archivo del CCL "
+                "(por ej. GD30 o GD30C) como segundo o tercer ticker; se divide igual, solo que a mano."
+                if data_src == 'stooq_txt' else "")
     )
 
-    main_ticker = st.text_input(
-        "Ticker principal",
-        value="",
-        help="El activo que querés analizar en profundidad (aparece en todos los títulos y gráficos principales).\n\n"
-             "Ejemplos: GGAL.BA, AAPL, BMA, AL30, MELI, YPF, TSLA"
-    )
+    preloaded_data = {}
+    if data_src == 'stooq_txt':
+        apply_ccl = False
+        st.info("Subí el .txt de descarga masiva de Stooq (columnas `<TICKER>,<PER>,<DATE>,<TIME>,"
+                "<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>`). El ticker se detecta solo desde el archivo.")
+        col_a, col_b, col_c = st.columns(3)
+        main_file = col_a.file_uploader("Archivo — ticker principal", type=["txt", "csv"], key="stooq_txt_main")
+        sec_file = col_b.file_uploader("Archivo — segundo ticker (opcional)", type=["txt", "csv"], key="stooq_txt_sec")
+        third_file = col_c.file_uploader("Archivo — tercer ticker (opcional)", type=["txt", "csv"], key="stooq_txt_third")
 
-    sec_ticker = st.text_input(
-        "Segundo ticker (opcional)",
-        value="",
-        help="Úsalo para crear un ratio o dividir el principal por este ticker.\n\n"
-             "Ejemplos comunes:\n"
-             "- Dividir un ADR por su equivalente en pesos (GGAL / GGAL.BA)\n"
-             "- Comparar con un banco o sector (COME / BMA)\n"
-             "- Normalizar por otro activo"
-    )
+        main_ticker, sec_ticker, third_ticker = "", "", ""
+        for rol, f, col in [("principal", main_file, col_a), ("segundo", sec_file, col_b), ("tercero", third_file, col_c)]:
+            if f is None:
+                continue
+            ticker, df = parse_stooq_txt(f)
+            if ticker is None or df.empty:
+                col.error(f"No se pudo leer el archivo del ticker {rol}.")
+                continue
+            preloaded_data[ticker] = df
+            col.caption(f"Detectado: **{ticker}**")
+            if rol == "principal":
+                main_ticker = ticker
+            elif rol == "segundo":
+                sec_ticker = ticker
+            else:
+                third_ticker = ticker
+    else:
+        main_ticker = st.text_input(
+            "Ticker principal",
+            value="",
+            help="El activo que querés analizar en profundidad (aparece en todos los títulos y gráficos principales).\n\n"
+                 "Ejemplos: GGAL.BA, AAPL, BMA, AL30, MELI, YPF, TSLA"
+        )
 
-    third_ticker = st.text_input(
-        "Tercer ticker (opcional)",
-        value="",
-        help="Permite agregar un segundo divisor en cadena.\n\n"
-             "Ejemplo: principal / segundo / tercero\n"
-             "Útil para ratios más complejos (poco común, pero disponible)."
-    )
+        sec_ticker = st.text_input(
+            "Segundo ticker (opcional)",
+            value="",
+            help="Úsalo para crear un ratio o dividir el principal por este ticker.\n\n"
+                 "Ejemplos comunes:\n"
+                 "- Dividir un ADR por su equivalente en pesos (GGAL / GGAL.BA)\n"
+                 "- Comparar con un banco o sector (COME / BMA)\n"
+                 "- Normalizar por otro activo"
+        )
+
+        third_ticker = st.text_input(
+            "Tercer ticker (opcional)",
+            value="",
+            help="Permite agregar un segundo divisor en cadena.\n\n"
+                 "Ejemplo: principal / segundo / tercero\n"
+                 "Útil para ratios más complejos (poco común, pero disponible)."
+        )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -861,7 +921,7 @@ def main():
     
     if st.button("Analizar", type="primary") and main_ticker:
         with st.spinner("Cargando datos..."):
-            raw_data = fetch_data(tickers_set, start_dt, end_dt, data_src, stooq_manual_files)
+            raw_data = fetch_data(tickers_set, start_dt, end_dt, data_src, stooq_manual_files, preloaded_data)
 
             if not raw_data:
                 st.error("No se obtuvieron datos.")
