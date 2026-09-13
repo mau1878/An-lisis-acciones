@@ -904,7 +904,7 @@ def main():
              "- Rojo → Blanco → Verde: rojo = caídas fuertes, verde = subas fuertes (el más intuitivo para la mayoría)\n"
              "- Verde → Blanco → Rojo: al revés (a veces preferido en finanzas para que positivo sea verde)"
     )
-    cmap_key = 'red_white_green' if "Rojo" in color_choice else 'green_white_red'
+    cmap_key = 'red_white_green' if color_choice == "Rojo → Blanco → Verde" else 'green_white_red'
 
     # Resto del código sigue igual (tickers_set, if st.button("Analizar") ... )
     # ...
