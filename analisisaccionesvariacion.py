@@ -605,18 +605,18 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
 
     valid_period_vals = pivot.values[~np.isnan(pivot.values)]
     if valid_period_vals.size > 0:
-        period_vmin = min(-100, valid_period_vals.min())
-        period_vmax = max(valid_period_vals.max(), 1)
+        period_abs_max = max(abs(valid_period_vals.min()), abs(valid_period_vals.max()), 1)
     else:
-        period_vmin, period_vmax = -100, 100
+        period_abs_max = 100
+    period_vmin, period_vmax = -period_abs_max, period_abs_max
     period_norm = TwoSlopeNorm(vmin=period_vmin, vcenter=0, vmax=period_vmax)
 
     valid_year_vals = combined['Año'].dropna()
     if not valid_year_vals.empty:
-        year_vmin = min(-100, valid_year_vals.min())
-        year_vmax = max(valid_year_vals.max(), 1)
+        year_abs_max = max(abs(valid_year_vals.min()), abs(valid_year_vals.max()), 1)
     else:
-        year_vmin, year_vmax = -100, 100
+        year_abs_max = 100
+    year_vmin, year_vmax = -year_abs_max, year_abs_max
     year_norm = TwoSlopeNorm(vmin=year_vmin, vcenter=0, vmax=year_vmax)
 
     fig, ax = plt.subplots(figsize=(13.5, max(6, len(pivot)*0.4)))
