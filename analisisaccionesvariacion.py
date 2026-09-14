@@ -608,7 +608,8 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
         period_abs_max = max(abs(valid_period_vals.min()), abs(valid_period_vals.max()), 1)
     else:
         period_abs_max = 100
-    period_vmin, period_vmax = -period_abs_max, period_abs_max
+    period_vmax = period_abs_max
+    period_vmin = -min(period_abs_max, 100)  # piso físico: nunca se puede caer más de -100%
     period_norm = TwoSlopeNorm(vmin=period_vmin, vcenter=0, vmax=period_vmax)
 
     valid_year_vals = combined['Año'].dropna()
@@ -616,7 +617,8 @@ def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_
         year_abs_max = max(abs(valid_year_vals.min()), abs(valid_year_vals.max()), 1)
     else:
         year_abs_max = 100
-    year_vmin, year_vmax = -year_abs_max, year_abs_max
+    year_vmax = year_abs_max
+    year_vmin = -min(year_abs_max, 100)  # piso físico: nunca se puede caer más de -100%
     year_norm = TwoSlopeNorm(vmin=year_vmin, vcenter=0, vmax=year_vmax)
 
     fig, ax = plt.subplots(figsize=(13.5, max(6, len(pivot)*0.4)))
