@@ -111,7 +111,8 @@ def validate_ticker_format(ticker, data_source):
 def descargar_datos_yfinance(ticker, start, end):
     try:
         session = cffi_requests.Session(impersonate="chrome124")
-        stock_data = yf.download(ticker, start=start, end=end, progress=False, session=session)
+        end_incl = pd.Timestamp(end) + pd.Timedelta(days=1)  # yfinance trata 'end' como exclusivo
+        stock_data = yf.download(ticker, start=start, end=end_incl, progress=False, session=session)
         if stock_data.empty:
             logger.warning(f"No datos para {ticker} en yfinance")
             return pd.DataFrame()
@@ -326,8 +327,8 @@ def extender_con_historico_merval(df, ticker, start_date):
 MERVAL_CCL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'merval_ccl_historico.csv')
 MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2003-03-24')  # desde acá manda el ratio YPFD.BA/YPF
 
-@st.cache_data(ttl="1d")
-def descargar_ypfd_ypf_crudo():
+@st.cache_data(ttl="1h")
+def descargar_ypfd_ypf_crudo(end_key=None):
     """Descarga YPFD.BA y YPF con precio sin ajustar por DIVIDENDOS
     (auto_adjust=False). El ratio de CCL necesita esto: el ADR cobra
     dividendos en USD y la acción local en ARS, así que sus historiales de
@@ -342,8 +343,8 @@ def descargar_ypfd_ypf_crudo():
     es constante (x10) en calcular_ratio_ypfd_ypf, sin necesidad de detectar
     fechas de split a mano."""
     try:
-        ypfd = yf.download('YPFD.BA', start='1996-01-01', progress=False, auto_adjust=False)
-        ypf = yf.download('YPF', start='1996-01-01', progress=False, auto_adjust=False)
+        ypfd = yf.download('YPFD.BA', start='1996-01-01', end=end_key, progress=False, auto_adjust=False)
+        ypf = yf.download('YPF', start='1996-01-01', end=end_key, progress=False, auto_adjust=False)
 
         def get_close(d):
             if isinstance(d.columns, pd.MultiIndex):
@@ -356,7 +357,8 @@ def descargar_ypfd_ypf_crudo():
         return pd.Series(dtype=float), pd.Series(dtype=float)
 
 def calcular_ratio_ypfd_ypf(start_date, end_date):
-    ypfd, ypf = descargar_ypfd_ypf_crudo()
+    end_key = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    ypfd, ypf = descargar_ypfd_ypf_crudo(end_key)
     if ypfd.empty or ypf.empty:
         return pd.Series(dtype=float)
     combined = pd.DataFrame({'YPFD': ypfd, 'YPF': ypf}).dropna()
@@ -980,7 +982,7 @@ def main():
                 st.warning("🔧 Debug temporal activo — ver el expander arriba de los gráficos")
                 with st.expander("🔧 Debug temporal: detalle mar-2003 (nuevo punto de empalme)", expanded=True):
                     st.write(f"Versión de yfinance: {yf.__version__}")
-                    ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo()
+                    ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo((df_daily.index.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d'))
                     ratio_dbg = (ypfd_dbg * 10) / ypf_dbg
                     st.write("Ratio YPFD.BA/YPF (x10 ya aplicado) alrededor del nuevo empalme:")
                     st.dataframe(ratio_dbg.loc['2003-03-10':'2003-04-10'])
