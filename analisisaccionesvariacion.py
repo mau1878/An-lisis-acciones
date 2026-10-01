@@ -819,6 +819,22 @@ def debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_
         st.write("Últimos 4 períodos (valor y fecha usados como cierre):")
         st.dataframe(ult.tail(4))
 
+        # ── Diagnóstico del ratio CCL (descarga cruda auto_adjust=False) ──
+        if 'YPFD.BA' in aligned_data and 'YPF' in aligned_data:
+            try:
+                end_key = (s.index.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                ypfd_c, ypf_c = descargar_ypfd_ypf_crudo(end_key)
+                st.write(f"**Ratio CCL – descarga cruda** (end_key = {end_key})")
+                st.write(f"YPFD.BA crudo: último índice = {ypfd_c.index.max()} | filas = {len(ypfd_c)} | tipo índice = {type(ypfd_c.index).__name__} | tz = {ypfd_c.index.tz}")
+                st.write(f"YPF crudo: último índice = {ypf_c.index.max()} | filas = {len(ypf_c)} | tipo índice = {type(ypf_c.index).__name__} | tz = {ypf_c.index.tz}")
+                comb = pd.DataFrame({'YPFD_crudo': ypfd_c, 'YPF_crudo': ypf_c}).tail(6)
+                comb['ratio'] = comb['YPFD_crudo'] * 10 / comb['YPF_crudo']
+                st.dataframe(comb)
+                ratio_full = calcular_ratio_ypfd_ypf(s.index.min(), s.index.max())
+                st.write(f"Ratio final (calcular_ratio_ypfd_ypf): último índice = {ratio_full.index.max()}")
+            except Exception as e:
+                st.write(f"Error en diagnóstico del ratio: {e}")
+
         if len(ult) >= 2:
             p1, p0 = ult['last'].iloc[-1], ult['last'].iloc[-2]
             st.write(f"Último período: {ult['fecha_dato_usado'].iloc[-1].date()} = {p1:.4f} vs "
