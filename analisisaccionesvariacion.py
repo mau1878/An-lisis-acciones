@@ -786,6 +786,42 @@ def create_visualizations(monthly_data, main, sec, third, metric_opt, color_ord,
     with st.expander(f"📊 Análisis de Rachas ({per_lbl.lower()}es)", expanded=False):
         analyze_streaks(monthly_data, main, per_lbl)
 
+# ─── DEBUG: AUDITORÍA DEL ÚLTIMO PERÍODO ───
+def debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt):
+    with st.expander("🔍 Auditoría del último período", expanded=False):
+        st.write(f"`end` pedido: {end_dt} (yfinance lo trata como exclusivo)")
+        # raw_info se captura ANTES de align_dates (que reindexa y hace ffill in-place)
+        for t, (ultimo, n) in raw_info.items():
+            st.write(f"**{t}** (crudo, antes de alinear): último dato = {ultimo.date()} | filas = {n}")
+
+        s = df_daily['Price']
+        valid = s.dropna()
+        if valid.empty:
+            st.warning("Serie final sin valores válidos.")
+            return
+        st.write(f"Serie final: último índice = {s.index.max().date()} | "
+                 f"último valor válido = {valid.index.max().date()} | "
+                 f"NaN en últimos 10 días = {int(s.tail(10).isna().sum())}")
+
+        # Componentes (ya alineados/ffill) de los últimos 10 días
+        comp = pd.DataFrame({t: d.iloc[:, 0] for t, d in aligned_data.items()}).tail(10)
+        comp['Price (final)'] = s.tail(10)
+        st.write("Componentes alineados (ffill) y precio final, últimos 10 días:")
+        st.dataframe(comp)
+
+        # Qué fecha y valor usa resample().last() en cada período
+        ult = valid.resample(freq).agg(['last', 'count'])
+        ult['fecha_dato_usado'] = valid.index.to_series().resample(freq).last()
+        ult['cambio_manual_%'] = ult['last'].pct_change() * 100
+        ult['cambio_heatmap_%'] = df_period[f'Cambio {per_label} (%)'].reindex(ult.index)
+        st.write("Últimos 4 períodos (valor y fecha usados como cierre):")
+        st.dataframe(ult.tail(4))
+
+        if len(ult) >= 2:
+            p1, p0 = ult['last'].iloc[-1], ult['last'].iloc[-2]
+            st.write(f"Último período: {ult['fecha_dato_usado'].iloc[-1].date()} = {p1:.4f} vs "
+                     f"{ult['fecha_dato_usado'].iloc[-2].date()} = {p0:.4f} → {(p1/p0-1)*100:.2f}%")
+
 # ─── APP PRINCIPAL ───
 def main():
     st.title("📈 Análisis de Variación de Precios - MTaurus")
@@ -928,6 +964,8 @@ def main():
             if not raw_data:
                 st.error("No se obtuvieron datos.")
                 return
+            # Snapshot del último dato crudo ANTES de alinear (align_dates modifica el dict in-place)
+            raw_info = {t: (d.index.max(), len(d)) for t, d in raw_data.items()}
             aligned_data = align_dates(raw_data)
             ratio_series = evaluate_ratio(main_ticker, sec_ticker, third_ticker, aligned_data, apply_ccl, data_src)
             if ratio_series is None or ratio_series.empty:
@@ -951,6 +989,8 @@ def main():
 
             df_period = df_daily.resample(freq).last()
             df_period[f'Cambio {per_label} (%)'] = df_period['Price'].pct_change() * 100
+
+            debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt)
 
             create_visualizations(
                 df_period, main_ticker, sec_ticker, third_ticker,
