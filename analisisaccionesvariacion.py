@@ -356,7 +356,7 @@ def descargar_ypfd_ypf_crudo(end_key=None):
         logger.error(f"Error descargando YPFD.BA/YPF crudo: {e}")
         return pd.Series(dtype=float), pd.Series(dtype=float)
 
-def calcular_ratio_ypfd_ypf(start_date, end_date):
+def calcular_ratio_ypfd_ypf(start_date, end_date, fallback=None):
     end_key = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
     ypfd, ypf = descargar_ypfd_ypf_crudo(end_key)
     if ypfd.empty or ypf.empty:
@@ -366,7 +366,20 @@ def calcular_ratio_ypfd_ypf(start_date, end_date):
     if combined.empty:
         return pd.Series(dtype=float)
     # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
-    return (combined['YPFD'] * 10) / combined['YPF']
+    ratio = (combined['YPFD'] * 10) / combined['YPF']
+
+    # Fallback para los últimos días: la descarga cruda (auto_adjust=False) a veces
+    # no trae la barra más reciente de uno de los dos tickers. En fechas posteriores
+    # a su último dato, usamos las series ya descargadas (sin ffill), donde el ajuste
+    # por dividendos es 1 en el tramo final, así que coinciden con el precio crudo.
+    if fallback is not None:
+        fb_ypfd, fb_ypf = fallback
+        fb = pd.DataFrame({'YPFD': fb_ypfd, 'YPF': fb_ypf}).dropna()
+        fb = fb[(fb.index > ratio.index.max()) & (fb.index >= pd.Timestamp(start_date))]
+        if not fb.empty:
+            logger.info(f"Ratio CCL: completando {len(fb)} día(s) finales con fallback")
+            ratio = pd.concat([ratio, (fb['YPFD'] * 10) / fb['YPF']])
+    return ratio
 
 @st.cache_data
 def cargar_ccl_historico_merval():
@@ -452,7 +465,7 @@ def align_dates(data):
     for ticker in data:
         data[ticker] = data[ticker].reindex(all_dates).ffill()
     return data
-def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_ratio, data_source):
+def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_ratio, data_source, raw_data=None):
     if not main_ticker or main_ticker not in data or data[main_ticker].empty:
         return None
 
@@ -461,6 +474,9 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
 
     if apply_ccl_ratio:
         if data_source == 'yfinance':
+            fallback = None
+            if raw_data and 'YPFD.BA' in raw_data and 'YPF' in raw_data:
+                fallback = (raw_data['YPFD.BA']['YPFD_BA'], raw_data['YPF']['YPF'])
             if main_ticker.upper() == '^MERV':
                 ratio = pd.Series(index=result.index, dtype=float)
 
@@ -473,13 +489,13 @@ def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_rat
                 # Tramo moderno (desde 3/1/2000): ratio YPFD.BA/YPF crudo, corregido por el split
                 idx_moderno = result.index[result.index >= MERVAL_CCL_HISTORICO_CUTOFF]
                 if len(idx_moderno) > 0:
-                    ratio_ypf = calcular_ratio_ypfd_ypf(idx_moderno.min(), idx_moderno.max())
+                    ratio_ypf = calcular_ratio_ypfd_ypf(idx_moderno.min(), idx_moderno.max(), fallback)
                     if not ratio_ypf.empty:
                         ratio.loc[idx_moderno] = ratio_ypf.reindex(idx_moderno)
 
                 result = result / ratio
             elif 'YPFD.BA' in data and 'YPF' in data:
-                ratio_ypf = calcular_ratio_ypfd_ypf(result.index.min(), result.index.max())
+                ratio_ypf = calcular_ratio_ypfd_ypf(result.index.min(), result.index.max(), fallback)
                 if not ratio_ypf.empty:
                     result = result / ratio_ypf.reindex(result.index)
         else:
@@ -789,7 +805,7 @@ def create_visualizations(monthly_data, main, sec, third, metric_opt, color_ord,
         analyze_streaks(monthly_data, main, per_lbl)
 
 # ─── DEBUG: AUDITORÍA DEL ÚLTIMO PERÍODO ───
-def debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt):
+def debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt, raw_snapshot=None):
     with st.expander("🔍 Auditoría del último período", expanded=False):
         st.write(f"`end` pedido: {end_dt} (yfinance lo trata como exclusivo)")
         # raw_info se captura ANTES de align_dates (que reindexa y hace ffill in-place)
@@ -830,8 +846,12 @@ def debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_
                 comb = pd.DataFrame({'YPFD_crudo': ypfd_c, 'YPF_crudo': ypf_c}).tail(6)
                 comb['ratio'] = comb['YPFD_crudo'] * 10 / comb['YPF_crudo']
                 st.dataframe(comb)
-                ratio_full = calcular_ratio_ypfd_ypf(s.index.min(), s.index.max())
-                st.write(f"Ratio final (calcular_ratio_ypfd_ypf): último índice = {ratio_full.index.max()}")
+                fb = None
+                if raw_snapshot and 'YPFD.BA' in raw_snapshot and 'YPF' in raw_snapshot:
+                    fb = (raw_snapshot['YPFD.BA']['YPFD_BA'], raw_snapshot['YPF']['YPF'])
+                ratio_full = calcular_ratio_ypfd_ypf(s.index.min(), s.index.max(), fb)
+                st.write(f"Ratio final (con fallback): último índice = {ratio_full.index.max()} | "
+                         f"días completados por fallback = {int((ratio_full.index > ypf_c.index.max()).sum())}")
             except Exception as e:
                 st.write(f"Error en diagnóstico del ratio: {e}")
 
@@ -984,8 +1004,9 @@ def main():
                 return
             # Snapshot del último dato crudo ANTES de alinear (align_dates modifica el dict in-place)
             raw_info = {t: (d.index.max(), len(d)) for t, d in raw_data.items()}
+            raw_snapshot = {t: d.copy() for t, d in raw_data.items()}  # sin ffill
             aligned_data = align_dates(raw_data)
-            ratio_series = evaluate_ratio(main_ticker, sec_ticker, third_ticker, aligned_data, apply_ccl, data_src)
+            ratio_series = evaluate_ratio(main_ticker, sec_ticker, third_ticker, aligned_data, apply_ccl, data_src, raw_snapshot)
             if ratio_series is None or ratio_series.empty:
                 st.error("No se pudo generar la serie ajustada.")
                 return
@@ -1008,7 +1029,7 @@ def main():
             df_period = df_daily.resample(freq).last()
             df_period[f'Cambio {per_label} (%)'] = df_period['Price'].pct_change() * 100
 
-            debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt)
+            debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt, raw_snapshot)
 
             create_visualizations(
                 df_period, main_ticker, sec_ticker, third_ticker,
