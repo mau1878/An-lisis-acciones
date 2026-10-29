@@ -1,5 +1,6 @@
 import streamlit as st
 import yfinance as yf
+from merval_msci import empalmar_merval, a_escala_msci
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -451,7 +452,11 @@ def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=No
             df = parse_csv_manual_stooq(file, ticker, start_date, end_date) if file else pd.DataFrame()
         else:
             df = pd.DataFrame()
+        if ticker == '^MERV':
+            df = empalmar_merval(df, start_date, end_date)  # S&P Merval -> MSCI Merval (desde 17/10/2026)
         df = extender_con_historico_merval(df, ticker, start_date)
+        if ticker == '^MERV':
+            df = a_escala_msci(df)  # todo ^MERV en escala MSCI (16/10/2026 = 100.000)
         if not df.empty:
             data[ticker] = df
     return data
