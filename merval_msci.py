@@ -1,268 +1,1150 @@
-"""
-merval_msci.py
-==============
-Empalme del S&P Merval (hasta 16/10/2026) con el MSCI Merval (desde 19/10/2026).
-
-Problema: desde el 19/10/2026 el índice pasó a ser el MSCI Merval, con base
-100.000 = cierre del S&P Merval del 16/10/2026. yfinance (^MERV) no trae el
-histórico diario del índice nuevo, solo el dato del día.
-
-Solución: para ^MERV se conserva lo que traiga la fuente hasta el 16/10/2026
-(escala S&P, ~3 millones) y desde el 17/10 se agrega la serie de Rava
-(ya reescalada a base MSCI) convertida a escala S&P con un factor k:
-
-    k = cierre S&P (yfinance) / cierre MSCI (Rava)     [medido en días solapados <= 16/10]
-
-Así todo el histórico sigue en la MISMA escala de antes (CCL, ajuste por
-inflación, Stooq 1988-96 y demás no cambian). Si algún día se prefiere la
-escala MSCI, dividir toda la serie por k.
-
-Uso (df con índice de fechas, o con columna 'Date', y una columna de precio):
-    from merval_msci import empalmar_merval
-    df = empalmar_merval(df)
-"""
+import streamlit as st
+import yfinance as yf
+from merval_msci import empalmar_merval, a_escala_msci, _status as _msci_status
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import requests
+from datetime import datetime
 import logging
 import os
-import time
+import urllib3
+from curl_cffi import requests as cffi_requests
+import json
+from pathlib import Path
+import io
 
-import pandas as pd
-import requests
-
+STOOQ_COOKIES_FILE = Path("stooq_cookies.json")
+# Logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ANCHOR = pd.Timestamp("2026-10-16")  # último cierre con el índice S&P; MSCI = 100.000
-RAVA_URL = "https://mercado.rava.com/api/prices/historico/ind/MERVAL"
-_HEADERS = {
-    "accept": "*/*",
-    "accept-language": "es-AR,es;q=0.9",
-    "referer": "https://mercado.rava.com/grafico?especie=MERVAL&mercado=ind&modo=historico",
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-}
-_BASE = os.path.dirname(os.path.abspath(__file__))
-SEED_PATH = os.path.join(_BASE, "data", "merval_msci_rava.csv")  # Date,Close (respaldo + caché)
-_TTL = 3600  # segundos: no pegarle a Rava más de una vez por hora por proceso
-_mem = {"t": 0.0, "s": None}
+st.set_page_config(
+    page_title="Análisis de Variación de Precios - MTaurus",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# True  -> la serie ^MERV completa (incluido Stooq 1988-96) se expresa en escala MSCI
-#          (16/10/2026 = 100.000), igual que se publica hoy el índice.
-# False -> se mantiene la escala S&P histórica (~3 millones).
-# Los retornos % son idénticos en ambos casos; solo cambia el nivel absoluto.
-ESCALA_MSCI = True
-_status = {"rava_ok": None, "ultimo_dato": None}  # lo lee la app para avisar en pantalla
-_K = {"v": None}  # último factor S&P/MSCI calculado (lo usa a_escala_msci)
+# ─── DARK MODE GLOBAL ───
+plt.style.use('dark_background')
 
+sns.set_theme(style="darkgrid", rc={
+    "axes.facecolor": "#0e1117",
+    "figure.facecolor": "#0e1117",
+    "grid.color": "#444444",
+    "text.color": "white",
+    "axes.labelcolor": "white",
+    "xtick.color": "white",
+    "ytick.color": "white",
+    "legend.facecolor": "#0e1117",
+    "legend.edgecolor": "#555555",
+})
 
-# ------------------------------------------------------------------ Rava
-def _fetch_rava(dias=45):
-    dias = max(int(dias), 45)
-    r = requests.get(RAVA_URL, params={"dias": dias}, headers=_HEADERS, timeout=20)
-    r.raise_for_status()
-    df = pd.DataFrame(r.json()["datos"])
-    idx = pd.to_datetime(df["fecha"], utc=True).dt.tz_localize(None).dt.normalize()
-    return pd.Series(df["precio"].astype(float).values, index=idx).sort_index()
+plt.rcParams.update({
+    'figure.facecolor': '#0e1117',
+    'axes.facecolor': '#0e1117',
+    'axes.edgecolor': '#666666',
+    'axes.labelcolor': 'white',
+    'xtick.color': 'white',
+    'ytick.color': 'white',
+    'text.color': 'white',
+    'grid.color': '#444444',
+})
 
+def apply_dark_theme(ax):
+    ax.set_facecolor('#0e1117')
+    ax.figure.patch.set_facecolor('#0e1117')
+    ax.tick_params(colors='white')
+    ax.xaxis.label.set_color('white')
+    ax.yaxis.label.set_color('white')
+    ax.title.set_color('white')
+    ax.grid(True, color='#444444', alpha=0.5)
+    if ax.get_legend():
+        legend = ax.get_legend()
+        legend.get_frame().set_facecolor('#0e1117')
+        legend.get_frame().set_edgecolor('#555555')
+        for text in legend.get_texts():
+            text.set_color('white')
 
-def _read_seed():
+def add_watermark(ax, fontsize=28, alpha=0.25):
+    ax.text(0.5, 0.5, "MTaurus - X: MTaurus_ok",
+            fontsize=fontsize, color='white', alpha=alpha,
+            ha='center', va='center', rotation=-42,
+            transform=ax.transAxes, fontweight='bold', zorder=999)
+
+def get_custom_cmap(color_order='red_white_green'):
+    if color_order == 'red_white_green':
+        colors = ['#d32f2f', '#ffffff', '#388e3c']
+    else:
+        colors = ['#388e3c', '#ffffff', '#d32f2f']
+    return LinearSegmentedColormap.from_list('custom_diverging', colors)
+
+def get_yearly_cmap(color_order='red_white_green'):
+    # Mismo espíritu rojo/verde que el mensual, pero en un tono más oscuro/saturado
+    # para que se distinga a simple vista sin mezclar las dos escalas.
+    if color_order == 'red_white_green':
+        colors = ['#7f0000', '#ffffff', '#0d3d1a']
+    else:
+        colors = ['#0d3d1a', '#ffffff', '#7f0000']
+    return LinearSegmentedColormap.from_list('yearly_diverging', colors)
+
+def calculate_yearly_changes(daily_data, price_col):
+    # Mismo método que mensual/trimestral: último valor del período vs último del período anterior
+    yearly_price = daily_data[price_col].resample('YE').last()
+    yearly_change = yearly_price.pct_change() * 100
+    yearly_change.index = yearly_change.index.year
+    return yearly_change
+
+def ajustar_precios_por_splits(df, ticker):
+    return df
+
+def validate_ticker_format(ticker, data_source):
+    if not ticker:
+        return True
+    return True
+
+# ─── DESCARGA DE DATOS ───
+def descargar_datos_yfinance(ticker, start, end):
     try:
-        s = pd.read_csv(SEED_PATH, parse_dates=["Date"]).set_index("Date")["Close"]
-        return s.astype(float).sort_index()
-    except Exception:
+        session = cffi_requests.Session(impersonate="chrome124")
+        end_incl = pd.Timestamp(end) + pd.Timedelta(days=1)  # yfinance trata 'end' como exclusivo
+        stock_data = yf.download(ticker, start=start, end=end_incl, progress=False, session=session)
+        if stock_data.empty:
+            logger.warning(f"No datos para {ticker} en yfinance")
+            return pd.DataFrame()
+        stock_data = stock_data.reset_index()
+        if isinstance(stock_data.columns, pd.MultiIndex):
+            if ('Adj Close', ticker) in stock_data.columns:
+                close_price = stock_data[('Adj Close', ticker)]
+            elif ('Close', ticker) in stock_data.columns:
+                close_price = stock_data[('Close', ticker)]
+            else:
+                return pd.DataFrame()
+            var_name = ticker.replace('.', '_')
+            df = pd.DataFrame({'Date': stock_data['Date'], var_name: close_price})
+        else:
+            close_col = 'Adj Close' if 'Adj Close' in stock_data.columns else 'Close'
+            var_name = ticker.replace('.', '_')
+            df = pd.DataFrame({'Date': stock_data['Date'], var_name: stock_data[close_col]})
+        df = ajustar_precios_por_splits(df, ticker)
+        df.set_index('Date', inplace=True)
+        return df
+    except Exception as e:
+        logger.error(f"Error yfinance {ticker}: {e}")
+        return pd.DataFrame()
+def cargar_cookies_stooq():
+    if not STOOQ_COOKIES_FILE.exists():
+        return {}
+    data = json.loads(STOOQ_COOKIES_FILE.read_text(encoding="utf-8"))
+    return {c["name"]: c["value"] for c in data.get("cookies", [])
+            if "stooq.com" in c.get("domain", "")}
+
+
+def descargar_datos_stooq(ticker, start_date, end_date):
+    cookies = cargar_cookies_stooq()
+    if not cookies:
+        logger.warning("No hay cookies de Stooq cacheadas — correr "
+                        "refrescar_cookies_stooq.py primero")
+        return pd.DataFrame()
+    try:
+        symbol = ticker.lower()
+        params = {
+            's': symbol,
+            'd1': start_date.strftime('%Y%m%d'),
+            'd2': end_date.strftime('%Y%m%d'),
+            'i': 'd',
+        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                  'Chrome/124.0.0.0 Safari/537.36'}
+        resp = requests.get('https://stooq.com/q/d/l/', params=params,
+                             headers=headers, cookies=cookies, timeout=15)
+        if resp.status_code != 200 or not resp.text.startswith('Date'):
+            logger.warning(f"Stooq {ticker}: respuesta inesperada "
+                            f"(status {resp.status_code}) — cookies vencidas o rate limit")
+            return pd.DataFrame()
+        df = pd.read_csv(io.StringIO(resp.text))
+        if df.empty or 'Close' not in df.columns:
+            return pd.DataFrame()
+        df['Date'] = pd.to_datetime(df['Date'])
+        var_name = ticker.replace('.', '_')
+        df = df[['Date', 'Close']].rename(columns={'Close': var_name})
+        df = ajustar_precios_por_splits(df, ticker)
+        return df.set_index('Date')
+    except Exception as e:
+        logger.error(f"Error Stooq {ticker}: {e}")
+        return pd.DataFrame()
+def descargar_datos_analisistecnico(ticker, start_date, end_date):
+    try:
+        from_timestamp = int(datetime.combine(start_date, datetime.min.time()).timestamp())
+        to_timestamp = int(datetime.combine(end_date, datetime.max.time()).timestamp())
+        cookies = {
+            'ChyrpSession': '0e2b2109d60de6da45154b542afb5768',
+            'i18next': 'es',
+            'PHPSESSID': '5b8da4e0d96ab5149f4973232931f033',
+        }
+        headers = {
+            'accept': '*/*',
+            'content-type': 'text/plain',
+            'dnt': '1',
+            'referer': 'https://analisistecnico.com.ar/',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+        symbol = ticker.replace('.BA', '')
+        params = {'symbol': symbol, 'resolution': 'D', 'from': str(from_timestamp), 'to': str(to_timestamp)}
+        response = requests.get('https://analisistecnico.com.ar/services/datafeed/history', params=params, cookies=cookies, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('s') != 'ok':
+                return pd.DataFrame()
+            df = pd.DataFrame({
+                'Date': pd.to_datetime(data['t'], unit='s'),
+                'Close': data['c']
+            })
+            df = df.sort_values('Date').drop_duplicates('Date')
+            df = ajustar_precios_por_splits(df, ticker)
+            var_name = ticker.replace('.', '_')
+            df = df.set_index('Date').rename(columns={'Close': var_name})
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"Error analisistecnico {ticker}: {e}")
+        return pd.DataFrame()
+
+def descargar_datos_iol(ticker, start_date, end_date):
+    try:
+        from_timestamp = int(datetime.combine(start_date, datetime.min.time()).timestamp())
+        to_timestamp = int(datetime.combine(end_date, datetime.max.time()).timestamp())
+        cookies = {
+            'intencionApertura': '0',
+            '__RequestVerificationToken': 'DTGdEz0miQYq1kY8y4XItWgHI9HrWQwXms6xnwndhugh0_zJxYQvnLiJxNk4b14NmVEmYGhdfSCCh8wuR0ZhVQ-oJzo1',
+            'isLogged': '1',
+            'uid': '1107644',
+        }
+        headers = {
+            'accept': '*/*',
+            'referer': 'https://iol.invertironline.com',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+        symbol = ticker.replace('.BA', '')
+        params = {'symbolName': symbol, 'exchange': 'BCBA', 'from': str(from_timestamp), 'to': str(to_timestamp), 'resolution': 'D'}
+        response = requests.get('https://iol.invertironline.com/api/cotizaciones/history', params=params, cookies=cookies, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') != 'ok' or 'bars' not in data:
+                return pd.DataFrame()
+            df = pd.DataFrame(data['bars'])
+            df['time'] = pd.to_datetime(df['time'], unit='s')
+            df = df.set_index('time').rename(columns={'close': ticker.replace('.', '_')})[['close']]
+            df = ajustar_precios_por_splits(df, ticker)
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"Error IOL {ticker}: {e}")
+        return pd.DataFrame()
+
+def descargar_datos_byma(ticker, start_date, end_date):
+    try:
+        from_timestamp = int(datetime.combine(start_date, datetime.min.time()).timestamp())
+        to_timestamp = int(datetime.combine(end_date, datetime.max.time()).timestamp())
+        cookies = {'JSESSIONID': '5080400C87813D22F6CAF0D3F2D70338'}
+        headers = {'Accept': 'application/json', 'Referer': 'https://open.bymadata.com.ar/'}
+        symbol = ticker.replace('.BA', '') + ' 24HS'
+        params = {'symbol': symbol, 'resolution': 'D', 'from': str(from_timestamp), 'to': str(to_timestamp)}
+        urllib3.disable_warnings()
+        response = requests.get('https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/chart/historical-series/history',
+                                params=params, cookies=cookies, headers=headers, verify=False)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('s') != 'ok':
+                return pd.DataFrame()
+            df = pd.DataFrame({'Date': pd.to_datetime(data['t'], unit='s'), 'Close': data['c']})
+            df = df.set_index('Date').rename(columns={'Close': ticker.replace('.', '_')})
+            df = ajustar_precios_por_splits(df, ticker)
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"Error ByMA {ticker}: {e}")
+        return pd.DataFrame()
+
+# ─── HISTÓRICO EXTENDIDO PARA ^MERV (Stooq, 1988-1996) ───
+# yfinance solo tiene ^MERV desde el 8/10/1996. Este archivo (Stooq, ticker ^MRV)
+# completa el tramo 1988-04-04 a 1996-10-07 (día calendario justo anterior al
+# arranque de yfinance, sin superposición). Colocar el archivo en el repo en:
+#   data/mrv_historico.txt
+MERVAL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'mrv_historico.txt')
+MERVAL_HISTORICO_CUTOFF = pd.Timestamp('1996-10-08')  # primer día con datos de yfinance
+
+@st.cache_data
+def cargar_historico_merval_stooq():
+    try:
+        hist = pd.read_csv(MERVAL_HISTORICO_PATH)
+        hist['Date'] = pd.to_datetime(hist['<DATE>'], format='%Y%m%d')
+        hist = hist[hist['Date'] < MERVAL_HISTORICO_CUTOFF]
+        hist = hist[['Date', '<CLOSE>']].sort_values('Date').drop_duplicates('Date')
+        return hist.set_index('Date')['<CLOSE>']
+    except Exception as e:
+        logger.error(f"Error cargando histórico Merval (Stooq): {e}")
         return pd.Series(dtype=float)
 
+def extender_con_historico_merval(df, ticker, start_date):
+    """Si el ticker es ^MERV y el usuario pidió datos desde antes del 8/10/1996,
+    completa 1988-1996 con el histórico de Stooq (^MRV)."""
+    if ticker.upper() != '^MERV':
+        return df
+    start_ts = pd.Timestamp(start_date)
+    if start_ts >= MERVAL_HISTORICO_CUTOFF:
+        return df
 
-def get_msci_merval(force=False):
-    """Serie MSCI Merval (escala MSCI) = respaldo local + Rava (lo de Rava pisa)."""
-    if not force and _mem["s"] is not None and time.time() - _mem["t"] < _TTL:
-        return _mem["s"]
-    seed = _read_seed()
-    _status["rava_ok"] = None
+    hist = cargar_historico_merval_stooq()
+    if hist.empty:
+        return df
+    hist = hist[hist.index >= start_ts]
+    if hist.empty:
+        return df
+
+    var_name = ticker.replace('.', '_')
+    hist_df = hist.to_frame(name=var_name)
+
+    if df.empty:
+        return hist_df
+    return pd.concat([hist_df, df[~df.index.isin(hist_df.index)]]).sort_index()
+
+# ─── CCL HISTÓRICO PARA ^MERV (1988-2003) Y RATIO YPFD.BA/YPF ───
+# Tramo histórico (Excel del usuario + fuente oficial BCRA "EvolucionMoneda"):
+#   - com_3501: 4/4/1988 a 31/12/1991
+#   - "TIPO DE CAMBIO - MONEDA DE CURSO LEGAL" (BCRA, serie oficial completa
+#     y sin baches): 2/1/1992 a 21/3/2003
+# La fecha de corte (24/3/2003) se determinó comparando día a día esta serie
+# oficial contra el ratio real YPFD.BA/YPF: es la primera fecha desde la que
+# la diferencia entre ambas queda sostenidamente por debajo del 3% (antes de
+# esa fecha, sobre todo en oct-2002, la diferencia llega a superar el 15%).
+# Colocar el archivo en el repo en: data/merval_ccl_historico.csv
+MERVAL_CCL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'merval_ccl_historico.csv')
+MERVAL_CCL_HISTORICO_CUTOFF = pd.Timestamp('2003-03-24')  # desde acá manda el ratio YPFD.BA/YPF
+
+@st.cache_data(ttl="1h")
+def descargar_ypfd_ypf_crudo(end_key=None):
+    """Descarga YPFD.BA y YPF con precio sin ajustar por DIVIDENDOS
+    (auto_adjust=False). El ratio de CCL necesita esto: el ADR cobra
+    dividendos en USD y la acción local en ARS, así que sus historiales de
+    ajuste por dividendos no son comparables entre sí y distorsionan el
+    ratio si se usa Adj Close (verificado con datos reales: en Convertibilidad
+    el ratio debía dar ~1.0 y con Adj Close daba ~21).
+
+    Nota sobre splits: en yfinance 1.x, auto_adjust=False solo evita el
+    ajuste por dividendos -- el ajuste por SPLITS se aplica siempre, de forma
+    consistente en toda la serie histórica (verificado: da el mismo resultado
+    sin importar el rango pedido). Por eso el multiplicador ADR:acción local
+    es constante (x10) en calcular_ratio_ypfd_ypf, sin necesidad de detectar
+    fechas de split a mano."""
     try:
-        # ventana suficiente para cubrir desde el último dato del respaldo (+ margen)
-        if seed.empty:
-            dias = 120
-        else:
-            dias = (pd.Timestamp.today().normalize() - seed.index.max()).days + 15
-        live = _fetch_rava(max(dias, 120))
-        _status["rava_ok"] = True
-        s = pd.concat([seed[~seed.index.isin(live.index)], live]).sort_index()
-        try:  # persistir (en Streamlit Cloud el disco es efímero; no pasa nada si falla)
-            os.makedirs(os.path.dirname(SEED_PATH), exist_ok=True)
-            s.rename("Close").rename_axis("Date").to_csv(SEED_PATH)
-        except Exception:
-            pass
+        ypfd = yf.download('YPFD.BA', start='1996-01-01', end=end_key, progress=False, auto_adjust=False)
+        ypf = yf.download('YPF', start='1996-01-01', end=end_key, progress=False, auto_adjust=False)
+
+        def get_close(d):
+            if isinstance(d.columns, pd.MultiIndex):
+                d = d.droplevel(1, axis=1)
+            return d['Close'] if 'Close' in d.columns else pd.Series(dtype=float)
+
+        return get_close(ypfd).dropna(), get_close(ypf).dropna()
     except Exception as e:
-        logger.warning(f"Rava no disponible ({e}); uso respaldo local")
-        _status["rava_ok"] = False
-        _status["ultimo_dato"] = seed.index.max() if not seed.empty else None
-        s = seed
-    _mem["s"], _mem["t"] = s, time.time()
-    return s
+        logger.error(f"Error descargando YPFD.BA/YPF crudo: {e}")
+        return pd.Series(dtype=float), pd.Series(dtype=float)
 
-
-# ------------------------------------------------------------------ factor
-def _factor(old_close, msci):
-    """k = escala S&P / escala MSCI, en los días <= ANCHOR donde hay ambos datos."""
-    ratio = (old_close.loc[:ANCHOR] / msci.loc[:ANCHOR]).dropna()
-    if ratio.empty:
-        return None
-    cv = ratio.std() / ratio.mean() if len(ratio) > 1 else 0.0
-    if cv > 0.01:
-        logger.warning(f"Factor S&P/MSCI no constante (cv={cv:.2%}); revisar reescalado de Rava")
-    return float(ratio.median())
-
-
-def _yf_anchor_window():
-    """Cierres S&P de yfinance cerca del ancla, solo para medir k cuando el df pedido no los trae."""
-    import yfinance as yf
-    d = yf.download("^MERV", start="2026-10-01", end="2026-10-17", progress=False, auto_adjust=False)
-    if d.empty:
+def calcular_ratio_ypfd_ypf(start_date, end_date, fallback=None):
+    end_key = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    ypfd, ypf = descargar_ypfd_ypf_crudo(end_key)
+    if ypfd.empty or ypf.empty:
         return pd.Series(dtype=float)
-    if isinstance(d.columns, pd.MultiIndex):
-        d.columns = d.columns.get_level_values(0)
-    s = d["Close"].dropna()
-    s.index = pd.to_datetime(s.index).tz_localize(None).normalize()
-    return s
+    combined = pd.DataFrame({'YPFD': ypfd, 'YPF': ypf}).dropna()
+    combined = combined[combined.index >= pd.Timestamp(start_date)]
+    if combined.empty:
+        return pd.Series(dtype=float)
+    # 1 ADR YPF equivale a 10 acciones locales YPFD.BA
+    ratio = (combined['YPFD'] * 10) / combined['YPF']
 
+    # Fallback para los últimos días: la descarga cruda (auto_adjust=False) a veces
+    # no trae la barra más reciente de uno de los dos tickers. En fechas posteriores
+    # a su último dato, usamos las series ya descargadas (sin ffill), donde el ajuste
+    # por dividendos es 1 en el tramo final, así que coinciden con el precio crudo.
+    if fallback is not None:
+        fb_ypfd, fb_ypf = fallback
+        fb = pd.DataFrame({'YPFD': fb_ypfd, 'YPF': fb_ypf}).dropna()
+        fb = fb[(fb.index > ratio.index.max()) & (fb.index >= pd.Timestamp(start_date))]
+        if not fb.empty:
+            logger.info(f"Ratio CCL: completando {len(fb)} día(s) finales con fallback")
+            ratio = pd.concat([ratio, (fb['YPFD'] * 10) / fb['YPF']])
+    return ratio
 
-# ------------------------------------------------------------------ API
-def empalmar_merval(df, start=None, end=None, price_col=None):
-    """
-    Devuelve `df` (^MERV en escala S&P) con las filas posteriores al 16/10/2026
-    reemplazadas por MSCI Merval de Rava x k. Mantiene la forma del df recibido
-    (índice de fechas o columna "Date"; devuelve solo la columna de precio).
-    `start`/`end` (inclusivos) acotan el tramo nuevo al rango pedido. Si algo falla,
-    devuelve df sin tocar.
-    """
+@st.cache_data
+def cargar_ccl_historico_merval():
     try:
-        had_date_col = df is not None and "Date" in getattr(df, "columns", [])
-        work = df.copy() if df is not None else pd.DataFrame()
-        if had_date_col:
-            work = work.set_index("Date")
-        if not work.empty:
-            work.index = pd.to_datetime(work.index)
-            if work.index.tz is not None:
-                work.index = work.index.tz_localize(None)
-            work.index = work.index.normalize()
-            col = price_col or ("Close" if "Close" in work.columns else work.columns[-1])
+        hist = pd.read_csv(MERVAL_CCL_HISTORICO_PATH, parse_dates=['Date'])
+        hist = hist.sort_values('Date').drop_duplicates('Date').set_index('Date')
+        return hist['TipoCambio']
+    except Exception as e:
+        logger.error(f"Error cargando CCL histórico Merval: {e}")
+        return pd.Series(dtype=float)
+def parse_csv_manual_stooq(file, ticker, start_date, end_date):
+    try:
+        df = pd.read_csv(file)
+        if 'Date' not in df.columns or 'Close' not in df.columns:
+            logger.warning(f"CSV manual de {ticker}: faltan columnas Date/Close")
+            return pd.DataFrame()
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df[(df['Date'] >= pd.Timestamp(start_date)) & (df['Date'] <= pd.Timestamp(end_date))]
+        var_name = ticker.replace('.', '_')
+        df = df[['Date', 'Close']].rename(columns={'Close': var_name})
+        df = ajustar_precios_por_splits(df, ticker)
+        return df.set_index('Date')
+    except Exception as e:
+        logger.error(f"Error parseando CSV manual de {ticker}: {e}")
+        return pd.DataFrame()
+def parse_stooq_txt(file, start_date=None, end_date=None):
+    """Parsea el formato de descarga masiva de Stooq: columnas
+    <TICKER>,<PER>,<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>.
+    El ticker se lee del propio archivo (columna <TICKER>), no hace falta
+    tipearlo a mano. Devuelve (ticker, DataFrame) o (None, DataFrame vacío)
+    si el archivo no tiene el formato esperado."""
+    try:
+        df = pd.read_csv(file)
+        df.columns = [c.strip('<>').upper() for c in df.columns]
+        if not {'TICKER', 'DATE', 'CLOSE'}.issubset(df.columns):
+            logger.warning("Archivo Stooq TXT: faltan columnas <TICKER>/<DATE>/<CLOSE>")
+            return None, pd.DataFrame()
+        ticker = str(df['TICKER'].iloc[0]).upper()
+        df['Date'] = pd.to_datetime(df['DATE'].astype(str), format='%Y%m%d')
+        df = df.sort_values('Date').drop_duplicates('Date')
+        var_name = ticker.replace('.', '_')
+        out = df[['Date', 'CLOSE']].rename(columns={'CLOSE': var_name})
+        out = ajustar_precios_por_splits(out, ticker)
+        return ticker, out.set_index('Date')
+    except Exception as e:
+        logger.error(f"Error parseando TXT Stooq: {e}")
+        return None, pd.DataFrame()
+
+def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=None, preloaded_data=None):
+    data = {}
+    preloaded_data = preloaded_data or {}
+    for ticker in tickers:
+        ticker = ticker.upper()
+        if ticker in preloaded_data:
+            df = preloaded_data[ticker]
+            df = df[(df.index >= pd.Timestamp(start_date)) & (df.index <= pd.Timestamp(end_date))]
+        elif data_source == 'yfinance':
+            df = descargar_datos_yfinance(ticker, start_date, end_date)
+        elif data_source == 'analisistecnico':
+            df = descargar_datos_analisistecnico(ticker, start_date, end_date)
+        elif data_source == 'iol':
+            df = descargar_datos_iol(ticker, start_date, end_date)
+        elif data_source == 'byma':
+            df = descargar_datos_byma(ticker, start_date, end_date)
+        elif data_source == 'stooq':
+            df = descargar_datos_stooq(ticker, start_date, end_date)
+        elif data_source == 'stooq_manual':
+            file = (stooq_manual_files or {}).get(ticker)
+            df = parse_csv_manual_stooq(file, ticker, start_date, end_date) if file else pd.DataFrame()
         else:
-            col = price_col or "Close"
-
-        msci = get_msci_merval()
-        if msci.empty:
-            return df
-
-        old_close = work[col].dropna() if not work.empty else pd.Series(dtype=float)
-        k = _factor(old_close, msci) if not old_close.empty else None
-        if k is None:  # el df no incluye días <= ancla (ej. start posterior): medirlo aparte
-            k = _factor(_yf_anchor_window(), msci)
-        if k is None:
-            logger.warning("No se pudo calcular el factor S&P/MSCI; ^MERV queda sin empalmar")
-            return df
-
-        _K["v"] = k
-        nuevo = (msci[msci.index > ANCHOR] * k).rename(col)
-        if start is not None:
-            nuevo = nuevo[nuevo.index >= pd.Timestamp(start)]
-        elif not work.empty:
-            nuevo = nuevo[nuevo.index >= work.index.min()]
-        if end is not None:
-            nuevo = nuevo[nuevo.index <= pd.Timestamp(end)]
-        if work.empty:
-            # sin datos viejos: solo se puede devolver el tramo nuevo
-            out = nuevo.to_frame()
-        else:
-            viejo = work[work.index <= ANCHOR]
-            base = viejo[[col]] if len(work.columns) > 1 else viejo
-            out = pd.concat([base, nuevo.to_frame()]).sort_index()
-            out = out[~out.index.duplicated(keep="last")]
-        out.index.name = work.index.name or "Date"
-        return out.reset_index() if had_date_col else out
-    except Exception as e:
-        logger.warning(f"empalmar_merval falló: {e}")
-        return df
-
-
-def a_escala_msci(df):
-    """
-    Paso FINAL (después de extender con Stooq): divide toda la serie ^MERV por k
-    para llevarla a escala MSCI. No hace nada si ESCALA_MSCI es False o si no hubo
-    empalme. Acepta índice de fechas o columna 'Date'.
-    """
-    try:
-        k = _K["v"]
-        if not ESCALA_MSCI or k is None or df is None or df.empty:
-            return df
-        out = df.copy()
-        cols = [c for c in out.columns if c != "Date" and pd.api.types.is_numeric_dtype(out[c])]
-        out[cols] = out[cols] / k
-        return out
-    except Exception as e:
-        logger.warning(f"a_escala_msci falló: {e}")
-        return df
-
-
-# ------------------------------------------------------------------ reemplazo de yf.download
-def _tickers_list(tickers):
-    if isinstance(tickers, str):
-        return [t for t in tickers.replace(",", " ").split() if t]
-    return list(tickers)
-
-
-def yf_download(tickers, *args, **kwargs):
-    """
-    Reemplazo directo de yf.download: igual salida, pero si entre los tickers está
-    ^MERV, esa columna se empalma con el MSCI Merval (y se pasa a escala MSCI si
-    ESCALA_MSCI). Si algo falla, devuelve lo que devolvió yfinance sin tocar.
-    """
-    import yfinance as yf
-    data = yf.download(tickers, *args, **kwargs)
-    try:
-        tl = [t.upper() for t in _tickers_list(tickers)]
-        if "^MERV" not in tl or data is None or data.empty:
-            return data
-        return _patch_download(data, tl, kwargs.get("start"), kwargs.get("end"))
-    except Exception as e:
-        logger.warning(f"yf_download: no se pudo empalmar ^MERV ({e})")
-        return data
-
-
-def _patch_download(data, tl, start, end):
-    multi = isinstance(data.columns, pd.MultiIndex)
-    idx = pd.to_datetime(data.index)
-    if idx.tz is not None:
-        idx = idx.tz_localize(None)
-    data = data.copy()
-    data.index = idx.normalize()
-
-    if multi:
-        fields = [f for f in data.columns.get_level_values(0).unique()
-                  if (f, "^MERV") in data.columns]
-        get = lambda f: data[(f, "^MERV")]
-    else:  # un solo ticker, columnas planas
-        fields = [f for f in data.columns]
-        get = lambda f: data[f]
-    price_f = next((f for f in ("Close", "Adj Close") if f in fields), None)
-    if price_f is None:
-        return data
-
-    base = get(price_f).dropna().to_frame("Close")
-    base.index.name = "Date"
-    end_incl = None if end is None else pd.Timestamp(end) - pd.Timedelta(days=1)  # yfinance: end exclusivo
-    emp = empalmar_merval(base, start, end_incl)
-    if emp is base or emp is None or len(emp) == 0:
-        return data
-    emp = a_escala_msci(emp)["Close"]
-    k = _K["v"] if ESCALA_MSCI else None
-
-    new_index = data.index.union(emp.index).sort_values()
-    data = data.reindex(new_index)
-    for f in fields:
-        col = ("%s" % f, "^MERV") if multi else f
-        if f in ("Close", "Adj Close"):
-            data[col] = emp.reindex(new_index)
-        elif f in ("Open", "High", "Low") and k:
-            vals = data[col].copy()
-            vals[vals.index > ANCHOR] = float("nan")  # no hay OHL diario para el tramo nuevo
-            data[col] = vals / k
+            df = pd.DataFrame()
+        if ticker == '^MERV':
+            df = empalmar_merval(df, start_date, end_date)  # S&P Merval -> MSCI Merval (desde 17/10/2026)
+            if _msci_status.get("rava_ok") is False:
+                ud = _msci_status.get("ultimo_dato")
+                st.warning("Rava no respondió: el tramo MSCI Merval usa el respaldo local"
+                           + (f" (último dato: {ud:%d/%m/%Y})." if ud is not None else " (vacío)."))
+        df = extender_con_historico_merval(df, ticker, start_date)
+        if ticker == '^MERV':
+            df = a_escala_msci(df)  # todo ^MERV en escala MSCI (16/10/2026 = 100.000)
+        if not df.empty:
+            data[ticker] = df
     return data
+
+def align_dates(data):
+    if not data:
+        return {}
+    all_dates = pd.Index([])
+    for df in data.values():
+        all_dates = all_dates.union(df.index)
+    for ticker in data:
+        data[ticker] = data[ticker].reindex(all_dates).ffill()
+    return data
+def evaluate_ratio(main_ticker, second_ticker, third_ticker, data, apply_ccl_ratio, data_source, raw_data=None):
+    if not main_ticker or main_ticker not in data or data[main_ticker].empty:
+        return None
+
+    var_main = main_ticker.replace('.', '_')
+    result = data[main_ticker][var_main]
+
+    if apply_ccl_ratio:
+        if data_source == 'yfinance':
+            fallback = None
+            if raw_data and 'YPFD.BA' in raw_data and 'YPF' in raw_data:
+                fallback = (raw_data['YPFD.BA']['YPFD_BA'], raw_data['YPF']['YPF'])
+            if main_ticker.upper() == '^MERV':
+                ratio = pd.Series(index=result.index, dtype=float)
+
+                # Tramo histórico (1988 - 2/1/2000): com_3501 (BCRA)
+                hist_ccl = cargar_ccl_historico_merval()
+                if not hist_ccl.empty:
+                    idx_hist = result.index[result.index < MERVAL_CCL_HISTORICO_CUTOFF]
+                    ratio.loc[idx_hist] = hist_ccl.reindex(idx_hist)
+
+                # Tramo moderno (desde 3/1/2000): ratio YPFD.BA/YPF crudo, corregido por el split
+                idx_moderno = result.index[result.index >= MERVAL_CCL_HISTORICO_CUTOFF]
+                if len(idx_moderno) > 0:
+                    ratio_ypf = calcular_ratio_ypfd_ypf(idx_moderno.min(), idx_moderno.max(), fallback)
+                    if not ratio_ypf.empty:
+                        ratio.loc[idx_moderno] = ratio_ypf.reindex(idx_moderno)
+
+                result = result / ratio
+            elif 'YPFD.BA' in data and 'YPF' in data:
+                ratio_ypf = calcular_ratio_ypfd_ypf(result.index.min(), result.index.max(), fallback)
+                if not ratio_ypf.empty:
+                    result = result / ratio_ypf.reindex(result.index)
+        else:
+            if 'GD30' in data and 'GD30C' in data:
+                ratio = data['GD30']['GD30'] / data['GD30C']['GD30C']
+                result = result / ratio
+
+    if second_ticker and third_ticker and second_ticker in data and third_ticker in data:
+        var2 = second_ticker.replace('.', '_')
+        var3 = third_ticker.replace('.', '_')
+        ratio = data[second_ticker][var2] / data[third_ticker][var3]
+        result = result / ratio
+    elif second_ticker and second_ticker in data:
+        var2 = second_ticker.replace('.', '_')
+        result = result / data[second_ticker][var2]
+
+    return result
+
+def calculate_streaks(series):
+    streaks = []
+    current_value = None
+    current_start = None
+    current_length = 0
+    for idx, val in series.items():
+        if current_value is None:
+            current_value = val > 0
+            current_start = idx
+            current_length = 1
+        elif (val > 0) == current_value:
+            current_length += 1
+        else:
+            streaks.append({
+                'start': current_start,
+                'end': idx - pd.Timedelta(days=1) if 'D' in series.index.freqstr else idx,
+                'length': current_length,
+                'value': 1 if current_value else -1
+            })
+            current_value = val > 0
+            current_start = idx
+            current_length = 1
+    if current_length > 0:
+        streaks.append({
+            'start': current_start,
+            'end': series.index[-1],
+            'length': current_length,
+            'value': 1 if current_value else -1
+        })
+    return pd.DataFrame(streaks)
+
+def calculate_drawdown(prices):
+    if len(prices) < 2:
+        return pd.Series(index=prices.index, data=0, name='Drawdown (%)')
+    peak = prices.cummax()
+    dd = (prices - peak) / peak * 100
+    return dd
+
+def create_drawdown_visualization(prices, main_ticker, second=None, third=None, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
+    st.subheader("Drawdown del Ticker Principal")
+    dd = calculate_drawdown(prices)
+    max_dd = dd.min()
+    current_dd = dd.iloc[-1]
+    col1, col2 = st.columns(2)
+    col1.metric("Máximo Drawdown", f"{max_dd:.2f}%")
+    col2.metric("Drawdown Actual", f"{current_dd:.2f}%")
+    
+    title = f"Drawdown - {main_ticker}" + (f" / {second}" if second else "") + \
+            (f" / {third}" if third else "") + ccl_text
+    
+    fig = px.area(dd.reset_index(), x='index', y=dd.name,
+                  title=title, template='plotly_dark',
+                  labels={'value': 'Drawdown (%)'})
+    fig.update_traces(line_color='crimson', fillcolor='rgba(220,20,60,0.3)')
+    fig.add_annotation(text="MTaurus - X: MTaurus_ok", xref="paper", yref="paper",
+                       x=0.5, y=0.5, showarrow=False, font_size=38, opacity=0.22, textangle=-42)
+    st.plotly_chart(fig, use_container_width=True)
+
+# ─── VISUALIZACIONES ───
+def create_histogram_with_gaussian(monthly_data, main, sec, third, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
+    st.subheader(f"Histograma de Cambios {period_label}es")
+    changes = (monthly_data[f'Cambio {period_label} (%)']
+               .replace([np.inf, -np.inf], np.nan).dropna())
+    if len(changes) < 2 or changes.max() == changes.min():
+        st.warning("No hay datos suficientes para el histograma (serie vacía, constante o con valores infinitos).")
+        return
+    fig, ax = plt.subplots(figsize=(10,6))
+    # binwidth=2 solo si no genera una cantidad absurda de bins (outliers extremos, p. ej. hiperinflación)
+    if (changes.max() - changes.min()) / 2 > 500:
+        sns.histplot(changes, kde=False, stat="density", color="#1e88e5", ax=ax, bins=100)
+    else:
+        sns.histplot(changes, kde=False, stat="density", color="#1e88e5", ax=ax, binwidth=2)
+    mu, std = norm.fit(changes)
+    x = np.linspace(changes.min(), changes.max(), 100)
+    ax.plot(x, norm.pdf(x, mu, std), 'white', lw=2.5)
+    for p, c in zip([5,25,50,75,95], ['#ef5350','#ffb300','#4caf50','#42a5f5','#ab47bc']):
+        val = np.percentile(changes, p)
+        ax.axvline(val, color=c, ls='--', alpha=0.8)
+        ax.text(val+0.5, ax.get_ylim()[1]*0.92, f'{val:.1f}', color=c, fontsize=10)
+    ax.set_title(f"Histograma {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
+    apply_dark_theme(ax)
+    add_watermark(ax)
+    st.pyplot(fig)
+
+def create_period_heatmap(monthly_data, main, sec, third, color_order, analysis_period, period_label,
+                          daily_data, price_col, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
+    st.subheader(f"Mapa de Calor {period_label} (+ columna de cambio anual)")
+    if analysis_period == "Mes a Mes":
+        idx = monthly_data.index.month
+        names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    else:
+        idx = monthly_data.index.quarter
+        names = ['Q1','Q2','Q3','Q4']
+    pivot = monthly_data.pivot_table(values=f'Cambio {period_label} (%)',
+                                     index=monthly_data.index.year, columns=idx, aggfunc='mean')
+
+    # Columna extra con el cambio anual (mismo método last-vs-last, calculado sobre el precio diario)
+    yearly_change = calculate_yearly_changes(daily_data, price_col)
+    combined = pivot.copy()
+    n_period_cols = pivot.shape[1]
+    combined['__gap__'] = np.nan          # columna en blanco: separa visualmente meses/trimestres de "Año"
+    combined['Año'] = yearly_change.reindex(pivot.index)
+    gap_col_idx = n_period_cols
+    year_col_idx = n_period_cols + 1
+
+    mask_main = np.zeros(combined.shape, dtype=bool)
+    mask_main[:, gap_col_idx] = True      # ocultar la columna vacía en el heatmap principal
+    mask_main[:, year_col_idx] = True     # ocultar la columna 'Año' en el heatmap principal
+
+    mask_year = np.ones(combined.shape, dtype=bool)
+    mask_year[:, year_col_idx] = combined['Año'].isna().values  # mostrar solo donde hay dato anual
+
+    valid_period_vals = pivot.values[~np.isnan(pivot.values)]
+    if valid_period_vals.size > 0:
+        period_abs_max = max(abs(valid_period_vals.min()), abs(valid_period_vals.max()), 1)
+    else:
+        period_abs_max = 100
+    period_vmax = period_abs_max
+    period_vmin = -min(period_abs_max, 100)  # piso físico: nunca se puede caer más de -100%
+    period_norm = TwoSlopeNorm(vmin=period_vmin, vcenter=0, vmax=period_vmax)
+
+    valid_year_vals = combined['Año'].dropna()
+    if not valid_year_vals.empty:
+        year_abs_max = max(abs(valid_year_vals.min()), abs(valid_year_vals.max()), 1)
+    else:
+        year_abs_max = 100
+    year_vmax = year_abs_max
+    year_vmin = -min(year_abs_max, 100)  # piso físico: nunca se puede caer más de -100%
+    year_norm = TwoSlopeNorm(vmin=year_vmin, vcenter=0, vmax=year_vmax)
+
+    fig, ax = plt.subplots(figsize=(13.5, max(6, len(pivot)*0.4)))
+    divider = make_axes_locatable(ax)
+    cax1 = divider.append_axes("right", size="3%", pad=0.6)
+    cax2 = divider.append_axes("right", size="3%", pad=0.9)
+
+    sns.heatmap(combined, mask=mask_main, cmap=get_custom_cmap(color_order), annot=True, fmt=".1f",
+                norm=period_norm, linewidths=0.5, linecolor='#0e1117', ax=ax, cbar_ax=cax1,
+                cbar_kws={'label': f'Cambio {period_label} (%)'})
+    sns.heatmap(combined, mask=mask_year, cmap=get_yearly_cmap(color_order), annot=True, fmt=".1f",
+                norm=year_norm, linewidths=0.5, linecolor='#0e1117',
+                ax=ax, cbar_ax=cax2, cbar_kws={'label': 'Cambio Anual (%)'})
+
+    ax.set_xticklabels([names[i-1] for i in pivot.columns] + ['', 'Año'], rotation=45)
+    ax.set_title(f"Heatmap {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
+    apply_dark_theme(ax)
+
+    # Repetir el año dentro de la columna en blanco, para no tener que mirar hasta la izquierda
+    for i, year in enumerate(combined.index):
+        ax.text(gap_col_idx + 0.5, i + 0.5, str(year), color='white', ha='center', va='center',
+                fontsize=9, fontweight='bold')
+
+    for cax in (cax1, cax2):
+        cax.tick_params(colors='white')
+        cax.yaxis.label.set_color('white')
+        cax.set_facecolor('#0e1117')
+    add_watermark(ax)
+    st.pyplot(fig)
+
+def create_average_changes_visualization(monthly_data, metric, main, sec, third, analysis_period, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
+    st.subheader(f"Cambios {metric} {period_label}es")
+    if analysis_period == "Mes a Mes":
+        grp = monthly_data.index.month
+        lbl = "Mes"
+        names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    else:
+        grp = monthly_data.index.quarter
+        lbl = "Trimestre"
+        names = ['Q1','Q2','Q3','Q4']
+    col_name = f'Cambio {period_label} (%)'
+
+    if metric == "Promedio":
+        avg = monthly_data.groupby(grp)[col_name].mean()
+    elif metric == "Mediana":
+        avg = monthly_data.groupby(grp)[col_name].median()
+    else:
+        st.error(f"Métrica no soportada: {metric}")
+        return
+
+    avg.index = [names[i-1] for i in avg.index]
+    fig, ax = plt.subplots(figsize=(10,5))
+    bars = ax.bar(avg.index, avg, color=['#4caf50' if v>=0 else '#ef5350' for v in avg])
+    ax.set_title(f"{metric} por {lbl} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
+    apply_dark_theme(ax)
+    add_watermark(ax)
+    st.pyplot(fig)
+
+def create_period_ranking(monthly_data, main, sec, third, analysis_period, period_label,
+                          daily_data, price_col, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
+    st.subheader(f"Ranking {period_label}es Positivos/Negativos (+ total de años)")
+    if analysis_period == "Mes a Mes":
+        grp = monthly_data.index.month
+        names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+    else:
+        grp = monthly_data.index.quarter
+        names = ['Q1','Q2','Q3','Q4']
+    pos = monthly_data.groupby(grp)[f'Cambio {period_label} (%)'].apply(lambda x: (x>0).sum())
+    neg = monthly_data.groupby(grp)[f'Cambio {period_label} (%)'].apply(lambda x: (x<0).sum())
+
+    # Bucket extra: total histórico de años positivos vs negativos (mismo cálculo last-vs-last que el heatmap)
+    yearly_change = calculate_yearly_changes(daily_data, price_col).dropna()
+    pos_years = int((yearly_change > 0).sum())
+    neg_years = int((yearly_change < 0).sum())
+
+    x_months = np.arange(len(names))
+    x_year = len(names) + 1  # deja un hueco de 1 posición como separación real, no solo una línea
+
+    fig, ax = plt.subplots(figsize=(11,6))
+    ax.bar(x_months - 0.2, pos, 0.4, label='Positivos', color='#4caf50')
+    ax.bar(x_months + 0.2, neg, 0.4, label='Negativos', color='#ef5350')
+    ax.bar(x_year - 0.2, pos_years, 0.4, color='#4caf50')
+    ax.bar(x_year + 0.2, neg_years, 0.4, color='#ef5350')
+    ax.axvline((x_months[-1] + x_year) / 2, color='white', ls=':', alpha=0.4)
+    ax.set_xticks(list(x_months) + [x_year])
+    ax.set_xticklabels(names + ['Total Años\n(histórico)'], rotation=45)
+    ax.legend()
+    ax.set_title(f"Ranking {period_label} - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
+    apply_dark_theme(ax)
+    add_watermark(ax)
+    st.pyplot(fig)
+
+def create_yearly_ranking(monthly_data, main, sec, third, period_label, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
+    st.subheader("Ranking Anual Positivos/Negativos")
+    pos = monthly_data.groupby(monthly_data.index.year)[f'Cambio {period_label} (%)'].apply(lambda x: (x>0).sum())
+    neg = monthly_data.groupby(monthly_data.index.year)[f'Cambio {period_label} (%)'].apply(lambda x: (x<0).sum())
+    years = sorted(pos.index)
+    fig, ax = plt.subplots(figsize=(12,6))
+    x = np.arange(len(years))
+    ax.bar(x - 0.2, [pos.get(y,0) for y in years], 0.4, label='Positivos', color='#4caf50')
+    ax.bar(x + 0.2, [neg.get(y,0) for y in years], 0.4, label='Negativos', color='#ef5350')
+    ax.set_xticks(x)
+    ax.set_xticklabels(years, rotation=45)
+    ax.legend()
+    ax.set_title(f"Ranking Anual - {main}" + (f" / {sec}" if sec else "") + (f" / {third}" if third else "")+ ccl_text)
+    apply_dark_theme(ax)
+    add_watermark(ax)
+    st.pyplot(fig)
+
+def display_statistics(monthly_data, period_label):
+    st.subheader("Estadísticas Descriptivas")
+    ch = monthly_data[f'Cambio {period_label} (%)'].dropna()
+    cols = st.columns(3)
+    cols[0].metric("Promedio", f"{ch.mean():.2f}%")
+    cols[0].metric("Mediana", f"{ch.median():.2f}%")
+    cols[1].metric("Máximo", f"{ch.max():.2f}%")
+    cols[1].metric("Mínimo", f"{ch.min():.2f}%")
+    cols[2].metric("Volatilidad", f"{ch.std():.2f}%")
+    cols[2].metric("% Positivos", f"{(ch>0).mean()*100:.1f}%")
+
+def analyze_streaks(monthly_data, main_ticker, period_label):
+    ch = monthly_data[f'Cambio {period_label} (%)'].dropna()
+    if len(ch) < 3:
+        st.info("Datos insuficientes para rachas.")
+        return
+    streaks = calculate_streaks(ch)
+    if streaks.empty:
+        st.info("No se detectaron rachas significativas.")
+        return
+    for _, r in streaks.iterrows():
+        dir_str = "positiva" if r['value'] > 0 else "negativa"
+        st.write(f"Racha **{dir_str}** de **{r['length']}** {period_label.lower()}es | {r['start'].date()} → {r['end'].date()}")
+
+def create_visualizations(monthly_data, main, sec, third, metric_opt, color_ord, 
+                         anal_per, per_lbl, daily_data, price_col, apply_ccl=False):
+    ccl_text = " - CCL aplicado" if apply_ccl else ""
+    title_suf = f" / {sec}" if sec else ""
+    title_suf += f" / {third}" if third else ""
+
+    # Gráfico de líneas principal
+    fig_line = px.line(monthly_data, x=monthly_data.index, y=f'Cambio {per_lbl} (%)',
+                       title=f"Variaciones {per_lbl}es - {main}{title_suf}{ccl_text}",
+                       template='plotly_dark')
+    fig_line.update_traces(mode='lines+markers')
+    fig_line.add_annotation(text="MTaurus - X: MTaurus_ok", xref="paper", yref="paper", 
+                            x=0.5, y=0.5, showarrow=False, font_size=34, 
+                            opacity=0.22, textangle=-42)
+    st.plotly_chart(fig_line, use_container_width=True)
+
+    # Llamadas a las funciones hijas (ahora con el parámetro apply_ccl)
+    create_histogram_with_gaussian(monthly_data, main, sec, third, per_lbl, apply_ccl)
+    create_period_heatmap(monthly_data, main, sec, third, color_ord, anal_per, per_lbl, daily_data, price_col, apply_ccl)
+    create_average_changes_visualization(monthly_data, metric_opt, main, sec, third, anal_per, per_lbl, apply_ccl)
+    create_period_ranking(monthly_data, main, sec, third, anal_per, per_lbl, daily_data, price_col, apply_ccl)
+    create_yearly_ranking(monthly_data, main, sec, third, per_lbl, apply_ccl)
+    
+    display_statistics(monthly_data, per_lbl)
+    
+    if price_col in daily_data.columns:
+        create_drawdown_visualization(daily_data[price_col], main, sec, third, apply_ccl)
+    
+    with st.expander(f"📊 Análisis de Rachas ({per_lbl.lower()}es)", expanded=False):
+        analyze_streaks(monthly_data, main, per_lbl)
+
+# ─── DEBUG: AUDITORÍA DEL ÚLTIMO PERÍODO ───
+def debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt, raw_snapshot=None):
+    with st.expander("🔍 Auditoría del último período", expanded=False):
+        st.write(f"`end` pedido: {end_dt} (yfinance lo trata como exclusivo)")
+        # raw_info se captura ANTES de align_dates (que reindexa y hace ffill in-place)
+        for t, (ultimo, n) in raw_info.items():
+            st.write(f"**{t}** (crudo, antes de alinear): último dato = {ultimo.date()} | filas = {n}")
+
+        s = df_daily['Price']
+        valid = s.dropna()
+        if valid.empty:
+            st.warning("Serie final sin valores válidos.")
+            return
+        st.write(f"Serie final: último índice = {s.index.max().date()} | "
+                 f"último valor válido = {valid.index.max().date()} | "
+                 f"NaN en últimos 10 días = {int(s.tail(10).isna().sum())}")
+
+        # Componentes (ya alineados/ffill) de los últimos 10 días
+        comp = pd.DataFrame({t: d.iloc[:, 0] for t, d in aligned_data.items()}).tail(10)
+        comp['Price (final)'] = s.tail(10)
+        st.write("Componentes alineados (ffill) y precio final, últimos 10 días:")
+        st.dataframe(comp)
+
+        # Qué fecha y valor usa resample().last() en cada período
+        ult = valid.resample(freq).agg(['last', 'count'])
+        ult['fecha_dato_usado'] = valid.index.to_series().resample(freq).last()
+        ult['cambio_manual_%'] = ult['last'].pct_change() * 100
+        ult['cambio_heatmap_%'] = df_period[f'Cambio {per_label} (%)'].reindex(ult.index)
+        st.write("Últimos 4 períodos (valor y fecha usados como cierre):")
+        st.dataframe(ult.tail(4))
+
+        # ── Diagnóstico del ratio CCL (descarga cruda auto_adjust=False) ──
+        if 'YPFD.BA' in aligned_data and 'YPF' in aligned_data:
+            try:
+                end_key = (s.index.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                ypfd_c, ypf_c = descargar_ypfd_ypf_crudo(end_key)
+                st.write(f"**Ratio CCL – descarga cruda** (end_key = {end_key})")
+                st.write(f"YPFD.BA crudo: último índice = {ypfd_c.index.max()} | filas = {len(ypfd_c)} | tipo índice = {type(ypfd_c.index).__name__} | tz = {ypfd_c.index.tz}")
+                st.write(f"YPF crudo: último índice = {ypf_c.index.max()} | filas = {len(ypf_c)} | tipo índice = {type(ypf_c.index).__name__} | tz = {ypf_c.index.tz}")
+                comb = pd.DataFrame({'YPFD_crudo': ypfd_c, 'YPF_crudo': ypf_c}).tail(6)
+                comb['ratio'] = comb['YPFD_crudo'] * 10 / comb['YPF_crudo']
+                st.dataframe(comb)
+                fb = None
+                if raw_snapshot and 'YPFD.BA' in raw_snapshot and 'YPF' in raw_snapshot:
+                    fb = (raw_snapshot['YPFD.BA']['YPFD_BA'], raw_snapshot['YPF']['YPF'])
+                ratio_full = calcular_ratio_ypfd_ypf(s.index.min(), s.index.max(), fb)
+                st.write(f"Ratio final (con fallback): último índice = {ratio_full.index.max()} | "
+                         f"días completados por fallback = {int((ratio_full.index > ypf_c.index.max()).sum())}")
+            except Exception as e:
+                st.write(f"Error en diagnóstico del ratio: {e}")
+
+        if len(ult) >= 2:
+            p1, p0 = ult['last'].iloc[-1], ult['last'].iloc[-2]
+            st.write(f"Último período: {ult['fecha_dato_usado'].iloc[-1].date()} = {p1:.4f} vs "
+                     f"{ult['fecha_dato_usado'].iloc[-2].date()} = {p0:.4f} → {(p1/p0-1)*100:.2f}%")
+
+# ─── APP PRINCIPAL ───
+# ─── DEBUG: REPORTE DE TEXTO COPIABLE ───
+def _dbg_stats(name, s):
+    s = pd.Series(s)
+    if s.empty:
+        return f"{name}: VACÍA"
+    v = pd.to_numeric(s, errors='coerce')
+    ok = v.replace([np.inf, -np.inf], np.nan).dropna()
+    first = ok.index.min() if not ok.empty else None
+    last = ok.index.max() if not ok.empty else None
+    return (f"{name}: filas={len(v)} | válidos={len(ok)} | NaN={int(v.isna().sum())} | "
+            f"inf={int(np.isinf(v).sum())} | ceros={int((v == 0).sum())} | "
+            f"índice {v.index.min()} -> {v.index.max()} | primer/último válido={first} / {last} | "
+            f"min={ok.min() if not ok.empty else None} | max={ok.max() if not ok.empty else None}")
+
+def _dbg_por_anio(name, s):
+    s = pd.Series(s)
+    if s.empty:
+        return f"{name} válidos por año: (vacía)"
+    ok = pd.to_numeric(s, errors='coerce').replace([np.inf, -np.inf], np.nan).dropna()
+    if ok.empty:
+        return f"{name} válidos por año: (ninguno)"
+    c = ok.groupby(pd.to_datetime(ok.index).year).size()
+    return f"{name} válidos por año: " + ", ".join(f"{y}:{n}" for y, n in c.items())
+
+def debug_reporte_texto(main_ticker, sec_ticker, third_ticker, apply_ccl, data_src, start_dt, end_dt,
+                        freq, per_label, raw_snapshot, aligned_data, ratio_series, df_daily, df_period):
+    """Un único bloque de texto (st.code, con botón de copiar) para pegarlo en el chat."""
+    L = []
+    try:
+        L.append("=== PARÁMETROS ===")
+        L.append(f"main={main_ticker} sec={sec_ticker} third={third_ticker} ccl={apply_ccl} "
+                 f"fuente={data_src} desde={start_dt} hasta={end_dt} freq={freq} periodo={per_label}")
+        L.append(f"yfinance={yf.__version__} pandas={pd.__version__} hoy={datetime.today():%Y-%m-%d}")
+        L.append(f"MSCI: status={_msci_status} k={__import__('merval_msci')._K['v']}")
+
+        L.append("\n=== DATOS CRUDOS (antes de alinear) ===")
+        for t, d in (raw_snapshot or {}).items():
+            col = d.columns[0] if len(d.columns) else None
+            L.append(_dbg_stats(f"{t} [{col}]", d[col]) if col else f"{t}: sin columnas")
+            L.append(_dbg_por_anio(t, d[col]) if col else "")
+            L.append(f"   primeras 3: {d[col].head(3).to_dict()}")
+            L.append(f"   últimas 3: {d[col].tail(3).to_dict()}")
+
+        L.append("\n=== ALINEADOS (ffill) ===")
+        for t, d in (aligned_data or {}).items():
+            L.append(_dbg_stats(t, d.iloc[:, 0]))
+
+        if apply_ccl and main_ticker.upper() == '^MERV':
+            L.append("\n=== COMPONENTES CCL DE ^MERV ===")
+            hist_ccl = cargar_ccl_historico_merval()
+            L.append(_dbg_stats("CCL histórico (BCRA, hasta 21/3/2003)", hist_ccl))
+            base = aligned_data[main_ticker].iloc[:, 0]
+            idx_hist = base.index[base.index < MERVAL_CCL_HISTORICO_CUTOFF]
+            idx_mod = base.index[base.index >= MERVAL_CCL_HISTORICO_CUTOFF]
+            L.append(f"días ^MERV tramo histórico={len(idx_hist)} (con CCL: {int(hist_ccl.reindex(idx_hist).notna().sum())}) | "
+                     f"tramo moderno={len(idx_mod)}")
+            if len(idx_mod):
+                fb = None
+                if raw_snapshot and 'YPFD.BA' in raw_snapshot and 'YPF' in raw_snapshot:
+                    fb = (raw_snapshot['YPFD.BA']['YPFD_BA'], raw_snapshot['YPF']['YPF'])
+                r = calcular_ratio_ypfd_ypf(idx_mod.min(), idx_mod.max(), fb)
+                L.append(_dbg_stats("Ratio YPFD.BA/YPF (moderno)", r))
+                L.append(f"   cubre {int(r.reindex(idx_mod).notna().sum())} de {len(idx_mod)} días del tramo moderno")
+                L.append(_dbg_por_anio("Ratio moderno", r))
+
+        L.append("\n=== SERIE FINAL ===")
+        L.append(_dbg_stats("ratio_series", ratio_series))
+        L.append(_dbg_por_anio("ratio_series", ratio_series))
+        L.append(_dbg_stats("df_daily['Price']", df_daily['Price']))
+        L.append(f"últimas 5: {df_daily['Price'].tail(5).to_dict()}")
+
+        L.append("\n=== PERÍODOS ===")
+        col = f'Cambio {per_label} (%)'
+        L.append(_dbg_stats("df_period['Price']", df_period['Price']))
+        L.append(_dbg_stats(col, df_period[col]))
+        L.append(_dbg_por_anio(col, df_period[col]))
+        L.append("últimos 6 períodos:\n" + df_period.tail(6).to_string())
+    except Exception as e:
+        import traceback
+        L.append(f"\n!!! ERROR GENERANDO DEBUG: {e}\n{traceback.format_exc()}")
+    with st.expander("🐞 Debug (texto copiable)", expanded=True):
+        st.caption("Copiá todo el bloque con el ícono de arriba a la derecha y pegalo en el chat.")
+        st.code("\n".join(L), language="text")
+
+def main():
+    st.title("📈 Análisis de Variación de Precios - MTaurus")
+    st.markdown("Seguinos en [X → @MTaurus_ok](https://x.com/MTaurus_ok)")
+
+    data_src = st.selectbox(
+    "Fuente de datos",
+    options=['yfinance', 'analisistecnico', 'iol', 'byma', 'stooq', 'stooq_manual', 'stooq_txt'],
+    help="...\n\n- stooq: automático vía cookies cacheadas (ver stooq_cookies.json)\n"
+         "- stooq_manual: subís vos el CSV descargado a mano desde stooq.com/q/d/?s=TICKER\n"
+         "- stooq_txt: subís el .txt de descarga masiva de Stooq (columnas <TICKER><PER><DATE>...<CLOSE>...); "
+         "el ticker se detecta solo del archivo, no hace falta escribirlo"
+)
+    apply_ccl = st.checkbox(
+        "Aplicar ratio CCL",
+        value=False,
+        disabled=(data_src == 'stooq_txt'),
+        help="Marca esta opción si querés 'dolarizar' el ticker principal dividiendo su precio por el dólar CCL.\n\n"
+             "- Con yfinance: usa YPFD.BA / YPF\n"
+             "- Con otras fuentes: usa GD30 / GD30C\n\n"
+             "Muy útil para ver la performance en dólares CCL y comparar con activos en el exterior.\n\n"
+             + ("No disponible con archivos Stooq TXT: si querés dolarizar, subí el archivo del CCL "
+                "(por ej. GD30 o GD30C) como segundo o tercer ticker; se divide igual, solo que a mano."
+                if data_src == 'stooq_txt' else "")
+    )
+
+    preloaded_data = {}
+    if data_src == 'stooq_txt':
+        apply_ccl = False
+        st.info("Subí el .txt de descarga masiva de Stooq (columnas `<TICKER>,<PER>,<DATE>,<TIME>,"
+                "<OPEN>,<HIGH>,<LOW>,<CLOSE>,<VOL>,<OPENINT>`). El ticker se detecta solo desde el archivo.")
+        col_a, col_b, col_c = st.columns(3)
+        main_file = col_a.file_uploader("Archivo — ticker principal", type=["txt", "csv"], key="stooq_txt_main")
+        sec_file = col_b.file_uploader("Archivo — segundo ticker (opcional)", type=["txt", "csv"], key="stooq_txt_sec")
+        third_file = col_c.file_uploader("Archivo — tercer ticker (opcional)", type=["txt", "csv"], key="stooq_txt_third")
+
+        main_ticker, sec_ticker, third_ticker = "", "", ""
+        for rol, f, col in [("principal", main_file, col_a), ("segundo", sec_file, col_b), ("tercero", third_file, col_c)]:
+            if f is None:
+                continue
+            ticker, df = parse_stooq_txt(f)
+            if ticker is None or df.empty:
+                col.error(f"No se pudo leer el archivo del ticker {rol}.")
+                continue
+            preloaded_data[ticker] = df
+            col.caption(f"Detectado: **{ticker}**")
+            if rol == "principal":
+                main_ticker = ticker
+            elif rol == "segundo":
+                sec_ticker = ticker
+            else:
+                third_ticker = ticker
+    else:
+        main_ticker = st.text_input(
+            "Ticker principal",
+            value="",
+            help="El activo que querés analizar en profundidad (aparece en todos los títulos y gráficos principales).\n\n"
+                 "Ejemplos: GGAL.BA, AAPL, BMA, AL30, MELI, YPF, TSLA"
+        )
+
+        sec_ticker = st.text_input(
+            "Segundo ticker (opcional)",
+            value="",
+            help="Úsalo para crear un ratio o dividir el principal por este ticker.\n\n"
+                 "Ejemplos comunes:\n"
+                 "- Dividir un ADR por su equivalente en pesos (GGAL / GGAL.BA)\n"
+                 "- Comparar con un banco o sector (COME / BMA)\n"
+                 "- Normalizar por otro activo"
+        )
+
+        third_ticker = st.text_input(
+            "Tercer ticker (opcional)",
+            value="",
+            help="Permite agregar un segundo divisor en cadena.\n\n"
+                 "Ejemplo: principal / segundo / tercero\n"
+                 "Útil para ratios más complejos (poco común, pero disponible)."
+        )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        start_dt = st.date_input(
+            "Desde",
+            value=pd.to_datetime("2010-01-01").date(),  # This remains the default selected date
+            min_value=pd.to_datetime("1790-01-01").date(), # <--- ADD THIS LINE
+            help="Fecha más antigua desde la cual descargar datos históricos.\n\n"
+                 "Cuanto más atrás, más completo el análisis (pero puede tardar más en cargar)."
+        )
+    with col2:
+        end_dt = st.date_input(
+            "Hasta",
+            value=datetime.today().date(),
+            help="Fecha más reciente de los datos.\n\n"
+                 "Por defecto es hoy. Podés poner una fecha anterior si querés comparar períodos específicos."
+        )
+
+    period_choice = st.radio(
+        "Período de análisis",
+        options=["Mes a Mes", "Trimestre a Trimestre"],
+        help="Define cómo agrupamos y calculamos las variaciones:\n\n"
+             "- Mes a Mes: variación mes contra mes anterior (más detalle)\n"
+             "- Trimestre a Trimestre: variación trimestre contra trimestre anterior (más estable, menos ruido)"
+    )
+    freq = 'ME' if period_choice == "Mes a Mes" else 'QE'          # ← CAMBIO AQUÍ
+    per_label = "Mensual" if period_choice == "Mes a Mes" else "Trimestral"
+
+    metric_choice = st.radio(
+        "Métrica",
+        options=["Promedio", "Mediana"],
+        help="Qué valor representativo usar en barras, heatmap y resúmenes:\n\n"
+             "- Promedio: sensible a valores extremos (outliers)\n"
+             "- Mediana: más robusta, ignora mejor los valores muy altos/bajos"
+    )
+
+    color_choice = st.selectbox(
+        "Colores Heatmap",
+        options=["Rojo → Blanco → Verde", "Verde → Blanco → Rojo"],
+        help="Orden de colores en el mapa de calor:\n\n"
+             "- Rojo → Blanco → Verde: rojo = caídas fuertes, verde = subas fuertes (el más intuitivo para la mayoría)\n"
+             "- Verde → Blanco → Rojo: al revés (a veces preferido en finanzas para que positivo sea verde)"
+    )
+    cmap_key = 'red_white_green' if color_choice == "Rojo → Blanco → Verde" else 'green_white_red'
+
+    # Resto del código sigue igual (tickers_set, if st.button("Analizar") ... )
+    # ...
+
+    tickers_set = {t for t in [main_ticker, sec_ticker, third_ticker] if t}
+    if apply_ccl:
+        tickers_set |= {'YPFD.BA', 'YPF'} if data_src == 'yfinance' else {'GD30', 'GD30C'}
+    stooq_manual_files = {}
+    if data_src == 'stooq_manual':
+        st.info("Bajá el CSV de cada ticker desde stooq.com/q/d/?s=TICKER (botón "
+                "'Download data in csv file...') y subilo acá.")
+        for t in sorted(tickers_set):
+            stooq_manual_files[t] = st.file_uploader(f"CSV de Stooq — {t}", type="csv", key=f"stooq_csv_{t}")
+    
+    if st.button("Analizar", type="primary") and main_ticker:
+        with st.spinner("Cargando datos..."):
+            raw_data = fetch_data(tickers_set, start_dt, end_dt, data_src, stooq_manual_files, preloaded_data)
+
+            if not raw_data:
+                st.error("No se obtuvieron datos.")
+                return
+            # Snapshot del último dato crudo ANTES de alinear (align_dates modifica el dict in-place)
+            raw_info = {t: (d.index.max(), len(d)) for t, d in raw_data.items()}
+            raw_snapshot = {t: d.copy() for t, d in raw_data.items()}  # sin ffill
+            aligned_data = align_dates(raw_data)
+            ratio_series = evaluate_ratio(main_ticker, sec_ticker, third_ticker, aligned_data, apply_ccl, data_src, raw_snapshot)
+            if ratio_series is None or ratio_series.empty:
+                st.error("No se pudo generar la serie ajustada.")
+                return
+
+            df_daily = ratio_series.to_frame(name='Price')
+            df_daily.index = pd.to_datetime(df_daily.index)
+
+            # ─── DEBUG TEMPORAL: sacar después de confirmar el nuevo empalme (24/3/2003) ───
+            if apply_ccl and main_ticker.upper() == '^MERV':
+                st.warning("🔧 Debug temporal activo — ver el expander arriba de los gráficos")
+                with st.expander("🔧 Debug temporal: detalle mar-2003 (nuevo punto de empalme)", expanded=True):
+                    st.write(f"Versión de yfinance: {yf.__version__}")
+                    ypfd_dbg, ypf_dbg = descargar_ypfd_ypf_crudo((df_daily.index.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d'))
+                    ratio_dbg = (ypfd_dbg * 10) / ypf_dbg
+                    st.write("Ratio YPFD.BA/YPF (x10 ya aplicado) alrededor del nuevo empalme:")
+                    st.dataframe(ratio_dbg.loc['2003-03-10':'2003-04-10'])
+                    st.write("df_daily (Price ya con CCL aplicado) alrededor del nuevo empalme:")
+                    st.dataframe(df_daily.loc['2003-03-10':'2003-04-10'])
+
+            df_period = df_daily.resample(freq).last()
+            df_period[f'Cambio {per_label} (%)'] = (
+                df_period['Price'].replace([np.inf, -np.inf], np.nan).pct_change(fill_method=None) * 100
+            ).replace([np.inf, -np.inf], np.nan)
+
+            debug_reporte_texto(main_ticker, sec_ticker, third_ticker, apply_ccl, data_src, start_dt, end_dt,
+                                freq, per_label, raw_snapshot, aligned_data, ratio_series, df_daily, df_period)
+            debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt, raw_snapshot)
+
+            create_visualizations(
+                df_period, main_ticker, sec_ticker, third_ticker,
+                metric_choice, cmap_key, period_choice, per_label,
+                df_daily, 'Price',
+                apply_ccl   # ← este parámetro ya está correcto
+            )
+
+    st.markdown("---")
+    st.caption("© 2025 MTaurus • @MTaurus_ok • Buenos Aires")
+
+if __name__ == "__main__":
+    main()
