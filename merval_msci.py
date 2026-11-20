@@ -49,11 +49,13 @@ _mem = {"t": 0.0, "s": None}
 # False -> se mantiene la escala S&P histórica (~3 millones).
 # Los retornos % son idénticos en ambos casos; solo cambia el nivel absoluto.
 ESCALA_MSCI = True
+_status = {"rava_ok": None, "ultimo_dato": None}  # lo lee la app para avisar en pantalla
 _K = {"v": None}  # último factor S&P/MSCI calculado (lo usa a_escala_msci)
 
 
 # ------------------------------------------------------------------ Rava
 def _fetch_rava(dias=45):
+    dias = max(int(dias), 45)
     r = requests.get(RAVA_URL, params={"dias": dias}, headers=_HEADERS, timeout=20)
     r.raise_for_status()
     df = pd.DataFrame(r.json()["datos"])
@@ -74,8 +76,15 @@ def get_msci_merval(force=False):
     if not force and _mem["s"] is not None and time.time() - _mem["t"] < _TTL:
         return _mem["s"]
     seed = _read_seed()
+    _status["rava_ok"] = None
     try:
-        live = _fetch_rava()
+        # ventana suficiente para cubrir desde el último dato del respaldo (+ margen)
+        if seed.empty:
+            dias = 120
+        else:
+            dias = (pd.Timestamp.today().normalize() - seed.index.max()).days + 15
+        live = _fetch_rava(max(dias, 120))
+        _status["rava_ok"] = True
         s = pd.concat([seed[~seed.index.isin(live.index)], live]).sort_index()
         try:  # persistir (en Streamlit Cloud el disco es efímero; no pasa nada si falla)
             os.makedirs(os.path.dirname(SEED_PATH), exist_ok=True)
@@ -84,6 +93,8 @@ def get_msci_merval(force=False):
             pass
     except Exception as e:
         logger.warning(f"Rava no disponible ({e}); uso respaldo local")
+        _status["rava_ok"] = False
+        _status["ultimo_dato"] = seed.index.max() if not seed.empty else None
         s = seed
     _mem["s"], _mem["t"] = s, time.time()
     return s
