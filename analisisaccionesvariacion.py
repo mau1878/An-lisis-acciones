@@ -429,6 +429,21 @@ def parse_stooq_txt(file, start_date=None, end_date=None):
         logger.error(f"Error parseando TXT Stooq: {e}")
         return None, pd.DataFrame()
 
+_FETCH_DEBUG = {}
+
+def _dbg_desc(df):
+    try:
+        if df is None or len(df) == 0:
+            return "VACÍO"
+        d = df.copy()
+        if 'Date' in d.columns:
+            d = d.set_index('Date')
+        c = d.iloc[:, -1]
+        return (f"filas={len(d)} cols={list(d.columns)} índice {d.index.min()} -> {d.index.max()} | "
+                f"primeras 3={c.head(3).round(2).to_dict()} | últimas 3={c.tail(3).round(2).to_dict()}")
+    except Exception as e:
+        return f"error describiendo: {e}"
+
 def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=None, preloaded_data=None):
     data = {}
     preloaded_data = preloaded_data or {}
@@ -453,7 +468,9 @@ def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=No
         else:
             df = pd.DataFrame()
         if ticker == '^MERV':
+            _FETCH_DEBUG['merv_pre'] = _dbg_desc(df)
             df = empalmar_merval(df, start_date, end_date)  # S&P Merval -> MSCI Merval (desde 17/10/2026)
+            _FETCH_DEBUG['merv_post_empalme'] = _dbg_desc(df)
             if _msci_status.get("rava_ok") is False:
                 ud = _msci_status.get("ultimo_dato")
                 st.warning("Rava no respondió: el tramo MSCI Merval usa el respaldo local"
@@ -912,6 +929,26 @@ def debug_reporte_texto(main_ticker, sec_ticker, third_ticker, apply_ccl, data_s
                  f"fuente={data_src} desde={start_dt} hasta={end_dt} freq={freq} periodo={per_label}")
         L.append(f"yfinance={yf.__version__} pandas={pd.__version__} hoy={datetime.today():%Y-%m-%d}")
         L.append(f"MSCI: status={_msci_status} k={__import__('merval_msci')._K['v']}")
+
+        L.append("\n=== ^MERV: ETAPAS EN fetch_data ===")
+        L.append(f"descarga yfinance (antes de empalmar): {_FETCH_DEBUG.get('merv_pre')}")
+        L.append(f"después de empalmar_merval: {_FETCH_DEBUG.get('merv_post_empalme')}")
+        if main_ticker.upper() == '^MERV':
+            L.append("--- prueba directa a yfinance (para comparar) ---")
+            for etiqueta, fn in [
+                ("yf.download start=desde, sin session", lambda: yf.download('^MERV', start=start_dt, progress=False)),
+                ("yf.download period='max'", lambda: yf.download('^MERV', period='max', progress=False)),
+                ("yf.Ticker.history period='max'", lambda: yf.Ticker('^MERV').history(period='max')),
+            ]:
+                try:
+                    d = fn()
+                    if isinstance(d.columns, pd.MultiIndex):
+                        d.columns = d.columns.get_level_values(0)
+                    c = d['Close'].dropna() if 'Close' in d.columns else pd.Series(dtype=float)
+                    L.append(f"{etiqueta}: filas={len(c)} | {c.index.min()} -> {c.index.max()} | "
+                             f"primeras 2={c.head(2).round(1).to_dict()} | últimas 2={c.tail(2).round(1).to_dict()}")
+                except Exception as e:
+                    L.append(f"{etiqueta}: ERROR {e}")
 
         L.append("\n=== DATOS CRUDOS (antes de alinear) ===")
         for t, d in (raw_snapshot or {}).items():
