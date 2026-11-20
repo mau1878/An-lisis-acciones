@@ -281,11 +281,11 @@ MERVAL_HISTORICO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 MERVAL_HISTORICO_CUTOFF = pd.Timestamp('1996-10-08')  # primer día con datos de yfinance
 
 @st.cache_data
-def cargar_historico_merval_stooq():
+def cargar_historico_merval_stooq(corte=None):
     try:
         hist = pd.read_csv(MERVAL_HISTORICO_PATH)
         hist['Date'] = pd.to_datetime(hist['<DATE>'], format='%Y%m%d')
-        hist = hist[hist['Date'] < MERVAL_HISTORICO_CUTOFF]
+        hist = hist[hist['Date'] < (corte if corte is not None else MERVAL_HISTORICO_CUTOFF)]
         hist = hist[['Date', '<CLOSE>']].sort_values('Date').drop_duplicates('Date')
         return hist.set_index('Date')['<CLOSE>']
     except Exception as e:
@@ -293,15 +293,17 @@ def cargar_historico_merval_stooq():
         return pd.Series(dtype=float)
 
 def extender_con_historico_merval(df, ticker, start_date):
-    """Si el ticker es ^MERV y el usuario pidió datos desde antes del 8/10/1996,
-    completa 1988-1996 con el histórico de Stooq (^MRV)."""
+    """Si el ticker es ^MERV, completa hacia atrás con el histórico de Stooq (^MRV, 1988 -> 9/2/2024)
+    todo lo que quede ANTES del primer dato disponible (normalmente 8/10/1996, el arranque de
+    yfinance; si yfinance/Rava arrancan más tarde, se completa con Stooq hasta ese punto)."""
     if ticker.upper() != '^MERV':
         return df
     start_ts = pd.Timestamp(start_date)
-    if start_ts >= MERVAL_HISTORICO_CUTOFF:
+    corte = df.index.min() if (df is not None and not df.empty) else MERVAL_HISTORICO_CUTOFF
+    if start_ts >= corte:
         return df
 
-    hist = cargar_historico_merval_stooq()
+    hist = cargar_historico_merval_stooq(corte)
     if hist.empty:
         return df
     hist = hist[hist.index >= start_ts]
@@ -469,13 +471,17 @@ def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=No
             df = pd.DataFrame()
         if ticker == '^MERV':
             _FETCH_DEBUG['merv_pre'] = _dbg_desc(df)
+            # 1° histórico Stooq (^MRV) hacia atrás de lo que traiga yfinance; 2° empalme con MSCI (Rava)
+            df = extender_con_historico_merval(df, ticker, start_date)
+            _FETCH_DEBUG['merv_post_stooq'] = _dbg_desc(df)
             df = empalmar_merval(df, start_date, end_date)  # S&P Merval -> MSCI Merval (desde 17/10/2026)
             _FETCH_DEBUG['merv_post_empalme'] = _dbg_desc(df)
             if _msci_status.get("rava_ok") is False:
                 ud = _msci_status.get("ultimo_dato")
                 st.warning("Rava no respondió: el tramo MSCI Merval usa el respaldo local"
                            + (f" (último dato: {ud:%d/%m/%Y})." if ud is not None else " (vacío)."))
-        df = extender_con_historico_merval(df, ticker, start_date)
+        else:
+            df = extender_con_historico_merval(df, ticker, start_date)
         if ticker == '^MERV':
             df = a_escala_msci(df)  # todo ^MERV en escala MSCI (16/10/2026 = 100.000)
         if not df.empty:
@@ -932,6 +938,7 @@ def debug_reporte_texto(main_ticker, sec_ticker, third_ticker, apply_ccl, data_s
 
         L.append("\n=== ^MERV: ETAPAS EN fetch_data ===")
         L.append(f"descarga yfinance (antes de empalmar): {_FETCH_DEBUG.get('merv_pre')}")
+        L.append(f"después de extender con Stooq: {_FETCH_DEBUG.get('merv_post_stooq')}")
         L.append(f"después de empalmar_merval: {_FETCH_DEBUG.get('merv_post_empalme')}")
         if main_ticker.upper() == '^MERV':
             L.append("--- prueba directa a yfinance (para comparar) ---")
