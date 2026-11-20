@@ -1,6 +1,6 @@
 import streamlit as st
 import yfinance as yf
-from merval_msci import empalmar_merval, a_escala_msci
+from merval_msci import empalmar_merval, a_escala_msci, _status as _msci_status
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -454,6 +454,10 @@ def fetch_data(tickers, start_date, end_date, data_source, stooq_manual_files=No
             df = pd.DataFrame()
         if ticker == '^MERV':
             df = empalmar_merval(df, start_date, end_date)  # S&P Merval -> MSCI Merval (desde 17/10/2026)
+            if _msci_status.get("rava_ok") is False:
+                ud = _msci_status.get("ultimo_dato")
+                st.warning("Rava no respondió: el tramo MSCI Merval usa el respaldo local"
+                           + (f" (último dato: {ud:%d/%m/%Y})." if ud is not None else " (vacío)."))
         df = extender_con_historico_merval(df, ticker, start_date)
         if ticker == '^MERV':
             df = a_escala_msci(df)  # todo ^MERV en escala MSCI (16/10/2026 = 100.000)
@@ -582,9 +586,17 @@ def create_drawdown_visualization(prices, main_ticker, second=None, third=None, 
 def create_histogram_with_gaussian(monthly_data, main, sec, third, period_label, apply_ccl=False):
     ccl_text = " - CCL aplicado" if apply_ccl else ""
     st.subheader(f"Histograma de Cambios {period_label}es")
-    changes = monthly_data[f'Cambio {period_label} (%)'].dropna()
+    changes = (monthly_data[f'Cambio {period_label} (%)']
+               .replace([np.inf, -np.inf], np.nan).dropna())
+    if len(changes) < 2 or changes.max() == changes.min():
+        st.warning("No hay datos suficientes para el histograma (serie vacía, constante o con valores infinitos).")
+        return
     fig, ax = plt.subplots(figsize=(10,6))
-    sns.histplot(changes, kde=False, stat="density", color="#1e88e5", ax=ax, binwidth=2)
+    # binwidth=2 solo si no genera una cantidad absurda de bins (outliers extremos, p. ej. hiperinflación)
+    if (changes.max() - changes.min()) / 2 > 500:
+        sns.histplot(changes, kde=False, stat="density", color="#1e88e5", ax=ax, bins=100)
+    else:
+        sns.histplot(changes, kde=False, stat="density", color="#1e88e5", ax=ax, binwidth=2)
     mu, std = norm.fit(changes)
     x = np.linspace(changes.min(), changes.max(), 100)
     ax.plot(x, norm.pdf(x, mu, std), 'white', lw=2.5)
@@ -1032,7 +1044,9 @@ def main():
                     st.dataframe(df_daily.loc['2003-03-10':'2003-04-10'])
 
             df_period = df_daily.resample(freq).last()
-            df_period[f'Cambio {per_label} (%)'] = df_period['Price'].pct_change() * 100
+            df_period[f'Cambio {per_label} (%)'] = (
+                df_period['Price'].replace([np.inf, -np.inf], np.nan).pct_change(fill_method=None) * 100
+            ).replace([np.inf, -np.inf], np.nan)
 
             debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt, raw_snapshot)
 
