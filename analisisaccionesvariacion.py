@@ -878,6 +878,90 @@ def debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_
                      f"{ult['fecha_dato_usado'].iloc[-2].date()} = {p0:.4f} → {(p1/p0-1)*100:.2f}%")
 
 # ─── APP PRINCIPAL ───
+# ─── DEBUG: REPORTE DE TEXTO COPIABLE ───
+def _dbg_stats(name, s):
+    s = pd.Series(s)
+    if s.empty:
+        return f"{name}: VACÍA"
+    v = pd.to_numeric(s, errors='coerce')
+    ok = v.replace([np.inf, -np.inf], np.nan).dropna()
+    first = ok.index.min() if not ok.empty else None
+    last = ok.index.max() if not ok.empty else None
+    return (f"{name}: filas={len(v)} | válidos={len(ok)} | NaN={int(v.isna().sum())} | "
+            f"inf={int(np.isinf(v).sum())} | ceros={int((v == 0).sum())} | "
+            f"índice {v.index.min()} -> {v.index.max()} | primer/último válido={first} / {last} | "
+            f"min={ok.min() if not ok.empty else None} | max={ok.max() if not ok.empty else None}")
+
+def _dbg_por_anio(name, s):
+    s = pd.Series(s)
+    if s.empty:
+        return f"{name} válidos por año: (vacía)"
+    ok = pd.to_numeric(s, errors='coerce').replace([np.inf, -np.inf], np.nan).dropna()
+    if ok.empty:
+        return f"{name} válidos por año: (ninguno)"
+    c = ok.groupby(pd.to_datetime(ok.index).year).size()
+    return f"{name} válidos por año: " + ", ".join(f"{y}:{n}" for y, n in c.items())
+
+def debug_reporte_texto(main_ticker, sec_ticker, third_ticker, apply_ccl, data_src, start_dt, end_dt,
+                        freq, per_label, raw_snapshot, aligned_data, ratio_series, df_daily, df_period):
+    """Un único bloque de texto (st.code, con botón de copiar) para pegarlo en el chat."""
+    L = []
+    try:
+        L.append("=== PARÁMETROS ===")
+        L.append(f"main={main_ticker} sec={sec_ticker} third={third_ticker} ccl={apply_ccl} "
+                 f"fuente={data_src} desde={start_dt} hasta={end_dt} freq={freq} periodo={per_label}")
+        L.append(f"yfinance={yf.__version__} pandas={pd.__version__} hoy={datetime.today():%Y-%m-%d}")
+        L.append(f"MSCI: status={_msci_status} k={__import__('merval_msci')._K['v']}")
+
+        L.append("\n=== DATOS CRUDOS (antes de alinear) ===")
+        for t, d in (raw_snapshot or {}).items():
+            col = d.columns[0] if len(d.columns) else None
+            L.append(_dbg_stats(f"{t} [{col}]", d[col]) if col else f"{t}: sin columnas")
+            L.append(_dbg_por_anio(t, d[col]) if col else "")
+            L.append(f"   primeras 3: {d[col].head(3).to_dict()}")
+            L.append(f"   últimas 3: {d[col].tail(3).to_dict()}")
+
+        L.append("\n=== ALINEADOS (ffill) ===")
+        for t, d in (aligned_data or {}).items():
+            L.append(_dbg_stats(t, d.iloc[:, 0]))
+
+        if apply_ccl and main_ticker.upper() == '^MERV':
+            L.append("\n=== COMPONENTES CCL DE ^MERV ===")
+            hist_ccl = cargar_ccl_historico_merval()
+            L.append(_dbg_stats("CCL histórico (BCRA, hasta 21/3/2003)", hist_ccl))
+            base = aligned_data[main_ticker].iloc[:, 0]
+            idx_hist = base.index[base.index < MERVAL_CCL_HISTORICO_CUTOFF]
+            idx_mod = base.index[base.index >= MERVAL_CCL_HISTORICO_CUTOFF]
+            L.append(f"días ^MERV tramo histórico={len(idx_hist)} (con CCL: {int(hist_ccl.reindex(idx_hist).notna().sum())}) | "
+                     f"tramo moderno={len(idx_mod)}")
+            if len(idx_mod):
+                fb = None
+                if raw_snapshot and 'YPFD.BA' in raw_snapshot and 'YPF' in raw_snapshot:
+                    fb = (raw_snapshot['YPFD.BA']['YPFD_BA'], raw_snapshot['YPF']['YPF'])
+                r = calcular_ratio_ypfd_ypf(idx_mod.min(), idx_mod.max(), fb)
+                L.append(_dbg_stats("Ratio YPFD.BA/YPF (moderno)", r))
+                L.append(f"   cubre {int(r.reindex(idx_mod).notna().sum())} de {len(idx_mod)} días del tramo moderno")
+                L.append(_dbg_por_anio("Ratio moderno", r))
+
+        L.append("\n=== SERIE FINAL ===")
+        L.append(_dbg_stats("ratio_series", ratio_series))
+        L.append(_dbg_por_anio("ratio_series", ratio_series))
+        L.append(_dbg_stats("df_daily['Price']", df_daily['Price']))
+        L.append(f"últimas 5: {df_daily['Price'].tail(5).to_dict()}")
+
+        L.append("\n=== PERÍODOS ===")
+        col = f'Cambio {per_label} (%)'
+        L.append(_dbg_stats("df_period['Price']", df_period['Price']))
+        L.append(_dbg_stats(col, df_period[col]))
+        L.append(_dbg_por_anio(col, df_period[col]))
+        L.append("últimos 6 períodos:\n" + df_period.tail(6).to_string())
+    except Exception as e:
+        import traceback
+        L.append(f"\n!!! ERROR GENERANDO DEBUG: {e}\n{traceback.format_exc()}")
+    with st.expander("🐞 Debug (texto copiable)", expanded=True):
+        st.caption("Copiá todo el bloque con el ícono de arriba a la derecha y pegalo en el chat.")
+        st.code("\n".join(L), language="text")
+
 def main():
     st.title("📈 Análisis de Variación de Precios - MTaurus")
     st.markdown("Seguinos en [X → @MTaurus_ok](https://x.com/MTaurus_ok)")
@@ -1048,6 +1132,8 @@ def main():
                 df_period['Price'].replace([np.inf, -np.inf], np.nan).pct_change(fill_method=None) * 100
             ).replace([np.inf, -np.inf], np.nan)
 
+            debug_reporte_texto(main_ticker, sec_ticker, third_ticker, apply_ccl, data_src, start_dt, end_dt,
+                                freq, per_label, raw_snapshot, aligned_data, ratio_series, df_daily, df_period)
             debug_ultimo_periodo(raw_info, aligned_data, df_daily, df_period, freq, per_label, end_dt, raw_snapshot)
 
             create_visualizations(
